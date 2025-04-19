@@ -50,7 +50,7 @@ export const generateSpeech = async ({
   
   // Limpiar el texto antes de procesarlo
   const cleanedText = cleanTextForSpeech(text);
-
+  
   // Combinar el system prompt con las instrucciones específicas del narrador
   const fullInstructions = instructions 
     ? `${SYSTEM_PROMPT} ${instructions}`
@@ -86,7 +86,7 @@ export const generateSpeech = async ({
     
     // Asegurarse de que el tipo MIME sea compatible con Safari
     const audioBlob = new Blob([data], { 
-      type: 'audio/mp4; codecs=mp4a.40.2' 
+      type: 'audio/mpeg' 
     });
     
     console.log("Blob de audio creado:", audioBlob.size, "bytes, tipo:", audioBlob.type);

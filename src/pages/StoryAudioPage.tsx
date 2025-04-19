@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Pause, ChevronLeft, ChevronRight, ArrowLeft } from "lucide-react";
+import { Play, Pause, ChevronLeft, ChevronRight, ArrowLeft, Trash } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { generateSpeech } from "@/services/ai/ttsService";
+import { generateMiniMaxiSpeech, mapVoiceToMiniMaxi } from "@/services/ai/minimaxiTtsService";
 import { useStoriesStore } from "../store/stories/storiesStore";
 import { useChaptersStore } from "../store/stories/chapters/chaptersStore";
 import { useAudioStore } from "../store/stories/audio/audioStore";
@@ -610,32 +610,9 @@ export default function StoryAudioPage() {
         setIsPlaying(false);
       } else {
         try {
-          // Detectar Safari
-          const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-
-          // Para Safari, necesitamos un enfoque especial
-          if (isSafari) {
-            // Asegurarse de que el audio está cargado
-            audioRef.current.load();
-
-            // Intentar reproducir con manejo especial para Safari
-            try {
-              await audioRef.current.play();
-              setIsPlaying(true);
-            } catch (e) {
-              console.log('Primer intento fallido en Safari:', e);
-
-              // En Safari, a menudo se necesita interacción del usuario
-              toast.info("Haz clic nuevamente para reproducir", {
-                duration: 2000,
-                position: "top-center"
-              });
-            }
-          } else {
-            // Para otros navegadores, reproducción estándar
-            await audioRef.current.play();
-            setIsPlaying(true);
-          }
+          // Reproducción estándar para todos los navegadores
+          await audioRef.current.play();
+          setIsPlaying(true);
         } catch (error) {
           console.error('Error starting playback:', error);
           toast.error("No se pudo reproducir el audio. Intente de nuevo.");
@@ -646,6 +623,9 @@ export default function StoryAudioPage() {
   };
 
   const handleGenerateAudio = async () => {
+    // Declarar progressInterval fuera del try para poder accederlo en el catch
+    let progressInterval: NodeJS.Timeout;
+    
     try {
       setIsLoading(true);
       // Actualizar estado de generación
@@ -653,7 +633,7 @@ export default function StoryAudioPage() {
       setGenerationProgress(10);
 
       // Simulate generation progress (in real implementation, you would get actual progress)
-      const progressInterval = setInterval(() => {
+      progressInterval = setInterval(() => {
         setGenerationProgress(prev => {
           const newValue = prev + Math.random() * 15;
           const progress = newValue > 90 ? 90 : newValue;
@@ -662,46 +642,53 @@ export default function StoryAudioPage() {
         });
       }, 800);
 
-      // Generar el audio usando el servicio con mapeo personalizado
-      const customVoiceMapping = {
-        "el-sabio": "sage",
-        "el-capitan": "onyx",
-        "el-animado": "fable",
-        "el-elegante": "shimmer",
-        "el-aventurero": "ash",
-        "el-enigmatico": "coral",
-        "el-risueno": "ballad",
-        "el-tierno": "alloy"
-      };
-      const mappedVoice = customVoiceMapping[selectedVoice.id] || 'nova';
+      // Obtener el ID de voz para MiniMaxi
+      const miniMaxiVoiceId = mapVoiceToMiniMaxi(selectedVoice.id);
 
-      const audioBlob = await generateSpeech({
+      console.log(`Generando audio con MiniMaxi usando voz: ${miniMaxiVoiceId}`);
+      console.log(`Texto para conversión (${content.length} caracteres):`);
+      console.log(content.substring(0, 100) + "..."); // Mostrar solo los primeros 100 caracteres
+
+      // Usar el nuevo servicio MiniMaxi
+      const audioBlob = await generateMiniMaxiSpeech({
         text: content,
-        voice: mappedVoice, // Usando el mapeo personalizado
-        model: 'tts-1',
-        instructions: `Voz del narrador: ${selectedVoice.name}`
+        voiceId: miniMaxiVoiceId,
+        speed: 1,
+        volume: 1,
+        pitch: 0,
+        model: 'speech-02-hd'
       });
 
-      // Solución especial para Safari - Convertir a ArrayBuffer y crear un Blob compatible
-      const response = new Response(audioBlob);
-      const arrayBuffer = await response.arrayBuffer();
-      const compatibleBlob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
-      const blobUrl = URL.createObjectURL(compatibleBlob);
+      // Verificar que el blob es válido y tiene contenido
+      if (!audioBlob || audioBlob.size === 0) {
+        throw new Error("El blob de audio generado está vacío o no es válido");
+      }
+      
+      console.log("Blob recibido correctamente, tamaño:", audioBlob.size, "bytes, tipo:", audioBlob.type);
+      
+      // Revocar URL anterior si existe
+      if (audioUrl && audioUrl.startsWith('blob:')) {
+        console.log("Revocando URL anterior:", audioUrl);
+        URL.revokeObjectURL(audioUrl);
+      }
+
+      // Crear Blob URL
+      const blobUrl = URL.createObjectURL(audioBlob);
+      console.log("Nueva URL de blob creada:", blobUrl);
       setAudioUrl(blobUrl);
+      
       // Guardar en caché
       addAudioToCache(storyId || '', currentChapterIndex, selectedVoice.id, blobUrl);
 
       // Actualizar estado
       setGenerationStatus(storyId || '', currentChapterIndex, 'completed', 100);
+      
+      // Cerrar popup y actualizar progreso
       setShowGenerationPopup(false);
-
-      clearInterval(progressInterval);
+      if (progressInterval) clearInterval(progressInterval);
       setGenerationProgress(100);
 
-      toast.success("Audio generado correctamente. Pulse el botón para reproducir.");
-
-      // Garantizar que el pop-up se cierre
-      setShowGenerationPopup(false);
+      toast.success("Audio generado correctamente con MiniMaxi. Pulse el botón para reproducir.");
 
       // Pre-carga el audio sin intentar reproducirlo
       if (audioRef.current) {
@@ -709,8 +696,12 @@ export default function StoryAudioPage() {
       }
     } catch (error) {
       console.error('Error generating audio:', error);
-      toast.error("Error al generar el audio");
+      toast.error(`Error al generar el audio: ${error instanceof Error ? error.message : 'Error desconocido'}`);
       setGenerationStatus(storyId || '', currentChapterIndex, 'error', 0);
+      
+      // Asegurarse de limpiar el intervalo y cerrar el popup en caso de error
+      if (progressInterval) clearInterval(progressInterval);
+      setShowGenerationPopup(false);
     } finally {
       setIsLoading(false);
     }
@@ -726,6 +717,28 @@ export default function StoryAudioPage() {
   const handleEndedEvent = () => {
     setIsPlaying(false);
     setCurrentTime(duration);
+  };
+
+  // Función para limpiar la caché de audio actual
+  const handleClearAudioCache = () => {
+    if (storyId && currentChapterIndex !== undefined) {
+      // Temporal fix: Revoke the current audioUrl if it's a blob
+      if (audioUrl && audioUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(audioUrl);
+      }
+      
+      // Eliminar de caché usando el store
+      const key = `${storyId}-${currentChapterIndex}-${selectedVoice.id}`;
+      const newCache = {...useAudioStore.getState().audioCache};
+      delete newCache[key];
+      useAudioStore.setState({ audioCache: newCache });
+      
+      // Actualizar state local
+      setAudioUrl(null);
+      
+      // Mostrar confirmación
+      toast.success("Caché de audio limpiada. Genere el audio nuevamente.");
+    }
   };
 
   return (
@@ -750,6 +763,15 @@ export default function StoryAudioPage() {
             <h1 className="text-lg font-semibold text-white">
               {title}
             </h1>
+            
+            {/* Botón de limpiar caché */}
+            <button
+              onClick={handleClearAudioCache}
+              className="ml-auto p-2 rounded-full bg-white/10 hover:bg-white/20 transition-all flex-shrink-0"
+              title="Limpiar caché de audio"
+            >
+              <Trash size={16} className="text-white opacity-70" />
+            </button>
           </div>
         </div>
 
@@ -855,8 +877,29 @@ export default function StoryAudioPage() {
         onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
         onEnded={handleEndedEvent}
         onError={(e) => {
+          // Más información detallada sobre el error
           console.error("Error en el elemento de audio:", e);
-          toast.error("Error al cargar el audio. Intente de nuevo.");
+          const audioElement = e.currentTarget as HTMLAudioElement;
+          
+          // Información detallada del error
+          if (audioElement.error) {
+            console.error("Código de error:", audioElement.error.code);
+            console.error("Mensaje de error:", audioElement.error.message);
+          }
+          
+          // Si hay una URL de blob inválida, intentar limpiarla
+          if (audioUrl && audioUrl.startsWith('blob:')) {
+            console.log("Intentando limpiar URL de blob:", audioUrl);
+            try {
+              URL.revokeObjectURL(audioUrl);
+              // Mostrar mensaje de error más específico
+              toast.error(`Error al cargar el audio (${audioElement.error?.code || 'desconocido'}): ${audioElement.error?.message || 'Intente limpiar la caché y generar nuevamente'}`);
+            } catch (revokeError) {
+              console.error("Error al revocar URL de blob:", revokeError);
+            }
+          } else {
+            toast.error("Error al cargar el audio. Intente de nuevo.");
+          }
         }}
         preload="auto"
         playsInline

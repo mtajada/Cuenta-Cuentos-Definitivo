@@ -67,7 +67,41 @@ export const useAudioStore = createPersistentStore<AudioState>(
     // Obtener audio de la caché si existe
     getAudioFromCache: (storyId, chapterId, voiceId) => {
       const key = `${storyId}-${chapterId}-${voiceId}`;
-      return get().audioCache[key]?.url || null;
+      console.log("🚀 ~ key:", key)
+      
+      // Obtener la URL de la caché
+      const cachedUrl = get().audioCache[key]?.url;
+      
+      // Si no hay URL, retornar null
+      if (!cachedUrl) {
+        return null;
+      }
+      
+      // Si no es una URL de blob, simplemente devolverla
+      if (!cachedUrl.startsWith('blob:')) {
+        return cachedUrl;
+      }
+      
+      // Como no podemos verificar fácilmente si un blob URL es válido de forma sincrónica,
+      // vamos a limpiar las entradas antiguas basándonos en el timestamp
+      const timestamp = get().audioCache[key]?.timestamp;
+      if (timestamp) {
+        const cachedDate = new Date(timestamp);
+        const now = new Date();
+        // Si el cache es de otra sesión (más de 3 horas), es probable que el blob ya no exista
+        const hoursDiff = (now.getTime() - cachedDate.getTime()) / (1000 * 60 * 60);
+        
+        if (hoursDiff > 3) {
+          console.log("🚀 ~ Cache demasiado antiguo, eliminando:", key);
+          // Eliminar la entrada de caché antigua
+          const newCache = {...get().audioCache};
+          delete newCache[key];
+          set({ audioCache: newCache });
+          return null;
+        }
+      }
+      
+      return cachedUrl;
     },
 
     // Actualizar el estado de generación de audio
