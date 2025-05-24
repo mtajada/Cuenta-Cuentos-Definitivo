@@ -1,7 +1,9 @@
+import React from 'react';
 import { createRoot } from 'react-dom/client'
 import { useEffect } from 'react'
 import App from './App.tsx'
 import './index.css'
+import { AuthProvider } from './contexts/AuthContext';
 import { useUserStore } from './store/user/userStore'
 import { initSyncService } from './services/syncService'
 
@@ -23,4 +25,10 @@ const AppWithAuth = () => {
   return <App />
 }
 
-createRoot(document.getElementById("root")!).render(<AppWithAuth />)
+createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <AuthProvider>
+      <AppWithAuth />
+    </AuthProvider>
+  </React.StrictMode>
+);

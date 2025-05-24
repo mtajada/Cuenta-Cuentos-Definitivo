@@ -24,88 +24,111 @@ supabase.auth.onAuthStateChange((event, session) => {
 // --- Funciones de Perfil ---
 
 export const syncUserProfile = async (
+    client: any, // client parameter added, global supabase still used for now
     userId: string,
-    // Renombramos el parámetro para claridad y ajustamos tipo
-    dataToSync: Partial<ProfileSettings> & { [key: string]: any },
-): Promise<{ success: boolean; error?: any }> => {
+    dataToSync: Partial<ProfileSettings>,
+): Promise<{ data?: Partial<ProfileSettings>; error?: any }> => {
     try {
         console.log(`[syncUserProfile_DEBUG] Attempting to sync for user ${userId} with data:`, dataToSync);
 
-        // Preparamos los datos para upsert, asegurando que 'id' y 'updated_at' están presentes
-        const upsertData = {
-            id: userId,             // ID es necesario para upsert
-            ...dataToSync,         // Usamos directamente los datos mapeados (ej. child_age, special_need)
-            updated_at: new Date(), // Siempre actualizamos la fecha
+        const upsertData: any = {
+            id: userId,
+            updated_at: new Date(),
         };
 
-        // Opcional: Asegurarse de que special_need sea null si es undefined, aunque upsert debería manejarlo
-        // Corregido: Usar notación de corchetes para evitar error de linting con snake_case
-        if (upsertData['special_need'] === undefined) {
-            upsertData['special_need'] = null;
-        }
+        // Map known ProfileSettings fields, handling potential snake_case for DB
+        if (dataToSync.language !== undefined) upsertData.language = dataToSync.language;
+        if (dataToSync.childAge !== undefined) upsertData.child_age = dataToSync.childAge;
+        // Ensure specialNeed is explicitly set to null if undefined or null in source, to clear the DB field
+        upsertData.special_need = dataToSync.specialNeed !== undefined ? dataToSync.specialNeed : null;
+        if (dataToSync.stripe_customer_id !== undefined) upsertData.stripe_customer_id = dataToSync.stripe_customer_id;
+        if (dataToSync.subscription_status !== undefined) upsertData.subscription_status = dataToSync.subscription_status;
+        if (dataToSync.subscription_id !== undefined) upsertData.subscription_id = dataToSync.subscription_id;
+        if (dataToSync.plan_id !== undefined) upsertData.plan_id = dataToSync.plan_id;
+        if (dataToSync.current_period_end !== undefined) upsertData.current_period_end = dataToSync.current_period_end;
+        if (dataToSync.voice_credits !== undefined) upsertData.voice_credits = dataToSync.voice_credits;
+        if (dataToSync.monthly_stories_generated !== undefined) upsertData.monthly_stories_generated = dataToSync.monthly_stories_generated;
+        if (dataToSync.monthly_voice_generations_used !== undefined) upsertData.monthly_voice_generations_used = dataToSync.monthly_voice_generations_used;
+        if (dataToSync.has_completed_setup !== undefined) upsertData.has_completed_setup = dataToSync.has_completed_setup;
 
-        const { error } = await supabase
+        // Include any other fields from dataToSync, assuming they are already in correct DB column format
+        // This is risky if dataToSync contains fields not in the DB or in wrong format.
+        // For robust solution, explicitly map all allowed fields.
+        // For now, merging like this for flexibility, but be cautious.
+        const remainingDataToSync = { ...dataToSync };
+        delete remainingDataToSync.language;
+        delete remainingDataToSync.childAge;
+        delete remainingDataToSync.specialNeed;
+        // ... delete other mapped fields to avoid double-inclusion if keys differ (e.g. childAge vs child_age)
+        // However, current ProfileSettings uses camelCase, so direct spreading after mapping known ones is okay.
+
+        const finalUpsertData = { ...upsertData, ...remainingDataToSync };
+
+
+        const { error } = await supabase // Using global supabase
             .from("profiles")
-            .upsert(upsertData); // <<< Pasamos el objeto correcto a upsert
+            .upsert(finalUpsertData);
 
         if (error) {
             console.error("Error sincronizando perfil (posible RLS):", error);
-            throw error; // Re-lanzar para el catch general
+            return { error };
         }
         console.log(`[syncUserProfile_DEBUG] Profile synced successfully for user ${userId}`);
-        return { success: true };
+        return { data: dataToSync, error: null };
     } catch (error) {
         console.error("Fallo general en syncUserProfile:", error);
-        // Asegurarse de devolver un objeto Error estándar
         const errorMessage = error instanceof Error ? error.message : String(error);
-        return { success: false, error: new Error(errorMessage) }; 
+        return { error: new Error(errorMessage) };
     }
 };
 
-export const getUserProfile = async (userId: string): Promise<{ success: boolean, profile?: ProfileSettings, error?: any }> => {
+export const getUserProfile = async (
+    client: any, // client parameter added, global supabase still used for now
+    userId: string
+): Promise<{ data: ProfileSettings | null; error?: any }> => {
     try {
         console.log(`Solicitando perfil para usuario: ${userId}`);
-        const { data, error } = await supabase
+        const { data, error } = await supabase // Using global supabase
             .from("profiles")
-            .select("*") // Selecciona todas las columnas
+            .select("*")
             .eq("id", userId)
             .single();
 
         if (error && error.code === 'PGRST116') {
             console.log(`No se encontró perfil para usuario ${userId}`);
-            return { success: false };
+            return { data: null, error: null };
         } else if (error) {
             console.error(`Error al obtener perfil para ${userId} (posible RLS):`, error);
-            throw error;
+            return { data: null, error: error }; // Return the error object
         }
 
+        if (!data) { // Handle case where query is successful but no data (should be caught by .single() or PGRST116)
+            console.log(`No se encontró perfil (inesperado después de la consulta) para usuario ${userId}`);
+            return { data: null, error: null };
+        }
+        
         console.log(`Datos de perfil recibidos para ${userId}:`, data);
 
-        if (data) {
-            // Mapea todos los campos recuperados
-            const profile: ProfileSettings = {
-                language: data.language,
-                childAge: data.child_age,
-                specialNeed: data.special_need,
-                stripe_customer_id: data.stripe_customer_id,
-                subscription_status: data.subscription_status,
-                subscription_id: data.subscription_id,
-                plan_id: data.plan_id,
-                current_period_end: data.current_period_end,
-                voice_credits: data.voice_credits,
-                monthly_stories_generated: data.monthly_stories_generated,
-                monthly_voice_generations_used: data.monthly_voice_generations_used,
-                has_completed_setup: data.has_completed_setup,
-            };
-            return { success: true, profile: profile };
-        }
+        // Mapea todos los campos recuperados
+        const profile: ProfileSettings = {
+            language: data.language,
+            childAge: data.child_age,
+            specialNeed: data.special_need,
+            stripe_customer_id: data.stripe_customer_id,
+            subscription_status: data.subscription_status,
+            subscription_id: data.subscription_id,
+            plan_id: data.plan_id,
+            current_period_end: data.current_period_end,
+            voice_credits: data.voice_credits,
+            monthly_stories_generated: data.monthly_stories_generated,
+            monthly_voice_generations_used: data.monthly_voice_generations_used,
+            has_completed_setup: data.has_completed_setup,
+        };
+        return { data: profile, error: null };
 
-        console.log(`No se encontró perfil (inesperado) para usuario ${userId}`);
-        return { success: false };
-
-    } catch (error) {
+    } catch (error) { // Catch any other unexpected errors
         console.error(`Fallo general en getUserProfile para ${userId}:`, error);
-        return { success: false, error };
+        return { data: null, error };
     }
 };
 
