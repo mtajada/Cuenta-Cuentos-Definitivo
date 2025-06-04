@@ -7,12 +7,13 @@ import StoryButton from "../components/StoryButton";
 import PageTransition from "../components/PageTransition";
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
-import { useUserStore } from "../store/user/userStore";
+import { useAuth } from "../context/AuthContext";
 
 export default function CharacterSelection() {
   const navigate = useNavigate();
   const { savedCharacters, selectCharacter, currentCharacter, loadCharactersFromSupabase } = useCharacterStore();
   const { updateStoryOptions } = useStoryOptionsStore();
+  const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   
   // Cargar personajes al montar el componente
@@ -21,7 +22,6 @@ export default function CharacterSelection() {
       console.log("[DEBUG] CharacterSelection montado - cargando personajes directamente desde Supabase");
       setIsLoading(true);
       
-      const user = useUserStore.getState().user;
       if (!user) {
         console.error("[DEBUG] No hay usuario autenticado para cargar personajes");
         setIsLoading(false);

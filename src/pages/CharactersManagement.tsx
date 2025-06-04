@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { User, Plus, Edit, Trash2, ArrowLeft } from "lucide-react";
 import { useCharacterStore } from "../store/character/characterStore";
 import { useEffect, useState } from "react";
-import { useUserStore } from "../store/user/userStore";
+import { useAuth } from "../context/AuthContext";
 import PageTransition from "../components/PageTransition";
 import StoryButton from "../components/StoryButton";
 import { motion } from "framer-motion";
@@ -13,6 +13,7 @@ import { StoryCharacter } from "../types";
 export default function CharactersManagement() {
   const navigate = useNavigate();
   const { savedCharacters, loadCharactersFromSupabase, deleteCharacter, selectCharacter, resetCharacter } = useCharacterStore();
+  const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [characterToDelete, setCharacterToDelete] = useState<StoryCharacter | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -23,7 +24,6 @@ export default function CharactersManagement() {
     const loadCharacters = async () => {
       setIsLoading(true);
       
-      const user = useUserStore.getState().user;
       if (!user) {
         console.error("No hay usuario autenticado para cargar personajes");
         setIsLoading(false);

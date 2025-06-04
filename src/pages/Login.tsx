@@ -1,23 +1,28 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Mail, Lock, Eye, EyeOff } from "lucide-react";
-import { useUserStore } from "../store/user/userStore";
+import { useAuth } from "../context/AuthContext";
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem } from "@/components/ui/form";
 import { useForm } from "react-hook-form";
 import PageTransition from "../components/PageTransition";
 import { useToast } from "@/hooks/use-toast";
 import { login, requestPasswordReset, signInWithGoogle } from "../supabaseAuth";
-import { getUserProfile } from "../services/supabase";
 
 export default function Login() {
   const navigate = useNavigate();
-  const { loginUser } = useUserStore();
+  const { user } = useAuth();
   const { toast } = useToast();
   const [showPassword, setShowPassword] = useState(false);
   const [rememberSession, setRememberSession] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      navigate('/home');
+    }
+  }, [user, navigate]);
 
   const form = useForm({
     defaultValues: {
@@ -41,29 +46,10 @@ export default function Login() {
       }
 
       if (user) {
-        loginUser(user);
-
         toast({
           title: "Inicio de sesión exitoso",
           description: "¡Bienvenido de nuevo!",
         });
-
-        try {
-          // Verificar si el usuario ya tiene un perfil configurado
-          const { success, profile } = await getUserProfile(user.id);
-
-          if (success && profile) {
-            // Si ya tiene perfil, redirigir a la página principal
-            navigate("/home");
-          } else {
-            // Si no tiene perfil, redirigir a la configuración de perfil
-            navigate("/profile");
-          }
-        } catch (profileError) {
-          console.error("Error al verificar perfil:", profileError);
-          // En caso de error, mandamos a la configuración por seguridad
-          navigate("/profile");
-        }
       } else {
         toast({
           title: "Error de inicio de sesión",

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
-import { useUserStore } from '@/store/user/userStore'; // Adjust path if needed
+import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/supabaseClient'; // Adjust path if needed
 import { useToast } from '@/hooks/use-toast'; // Adjust path if needed
 import PageTransition from '@/components/PageTransition'; // Adjust path if needed
@@ -26,12 +26,7 @@ const PlansPage: React.FC = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const { toast } = useToast();
-    const { profileSettings, isPremium } = useUserStore(
-        (state) => ({
-            profileSettings: state.profileSettings,
-            isPremium: state.isPremium,
-        })
-    );
+    const { profileSettings, isPremium } = useAuth();
 
     const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
     const [isPortalLoading, setIsPortalLoading] = useState(false);

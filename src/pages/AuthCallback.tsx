@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useUserStore } from "../store/user/userStore";
+import { useAuth } from "../context/AuthContext";
 import { supabase } from "../supabaseClient";
 import { getUserProfile } from "../services/supabase";
 
 export default function AuthCallback() {
   const navigate = useNavigate();
-  const { loginUser, hasCompletedProfile } = useUserStore();
+  const { user } = useAuth();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -23,28 +23,18 @@ export default function AuthCallback() {
         }
 
         if (data?.session?.user) {
-          // Usuario autenticado correctamente
           const userId = data.session.user.id;
-          
-          loginUser({
-            id: userId,
-            email: data.session.user.email || "",
-          });
-          
+
           try {
-            // Verificar si el usuario ya tiene un perfil configurado
             const { success, profile } = await getUserProfile(userId);
-            
+
             if (success && profile) {
-              // Si ya tiene perfil, redirigir a la página principal
               navigate("/home");
             } else {
-              // Si no tiene perfil, redirigir a la configuración de perfil
               navigate("/profile");
             }
           } catch (profileError) {
             console.error("Error al verificar perfil:", profileError);
-            // En caso de error, mandamos a la configuración por seguridad
             navigate("/profile");
           }
         } else {
@@ -59,7 +49,7 @@ export default function AuthCallback() {
     };
 
     handleAuthCallback();
-  }, [navigate, loginUser]);
+  }, [navigate]);
 
   return (
     <div className="gradient-bg min-h-screen flex flex-col items-center justify-center p-6">

@@ -4,7 +4,7 @@ import { Check, Globe, User, Languages, Calendar, Heart } from "lucide-react";
 import { motion } from "framer-motion";
 
 // Importaciones del Store y tipos
-import { useUserStore } from "@/store/user/userStore";
+import { useAuth } from "@/context/AuthContext";
 import { ProfileSettings } from "@/types";
 import { supabase } from "@/supabaseClient";
 
@@ -17,7 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 
 const ProfileConfigPage: React.FC = () => {
     const navigate = useNavigate();
-    const { profileSettings: storeProfileSettings, setProfileSettings, user, hasCompletedProfile } = useUserStore();
+    const { profileSettings: storeProfileSettings, setProfileSettings, user, hasCompletedProfile } = useAuth();
     const { toast } = useToast();
 
     // Estado Local del Formulario

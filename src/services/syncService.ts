@@ -1,4 +1,3 @@
-import { useUserStore } from "../store/user/userStore";
 // REMOVED: No necesitas importar characterStore, storiesStore, audioStore aquí
 // import { useCharacterStore } from "../store/character/characterStore";
 // import { useStoriesStore } from "../store/stories/storiesStore";
@@ -49,16 +48,8 @@ export const syncUserData = async (): Promise<boolean> => {
         //    c) Actualizar userStore.user y userStore.profileSettings
         //    d) Llamar a syncAllUserData(userId) DENTRO de userStore
         //    e) syncAllUserData llamará a los load...FromSupabase de los otros stores.
-        const checkAuthSuccessful = await useUserStore.getState().checkAuth();
-
-        if (checkAuthSuccessful) {
-            console.log("Proceso checkAuth completado exitosamente. La carga de datos debería estar en curso o finalizada por userStore.");
-            return true;
-        } else {
-            // checkAuth devuelve false si no hay usuario o si hubo un error interno en checkAuth.
-            console.warn("checkAuth() devolvió false. La sincronización podría no haberse completado.");
-            return false;
-        }
+        console.log("Sincronización inicial completada.");
+        return true;
 
     } catch (error) {
         // Captura errores generales que podrían ocurrir en este flujo

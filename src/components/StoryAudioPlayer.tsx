@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { generateSpeech, OPENAI_VOICES, OpenAIVoiceType } from "@/services/ai/ttsService";
 import { useAudioStore } from "@/store/stories/audio/audioStore";
-import { useUserStore } from "@/store/user/userStore";
+import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 
 // Voice types with their details
@@ -94,7 +94,7 @@ export default function StoryAudioPlayer({ text, onClose }: StoryAudioPlayerProp
     getCurrentVoice
   } = useAudioStore();
   
-  const { canGenerateVoice, isPremium, getRemainingMonthlyVoiceGenerations, getAvailableVoiceCredits } = useUserStore();
+  const { canGenerateVoice, isPremium, getRemainingMonthlyVoiceGenerations, getAvailableVoiceCredits } = useAuth();
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);

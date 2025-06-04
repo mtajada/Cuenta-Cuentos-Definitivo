@@ -2,14 +2,14 @@ import React, { useEffect } from 'react';
 import { useNavigate, Link } from "react-router-dom";
 import { Settings, User, Star, ChevronRight } from "lucide-react";
 import { motion } from "framer-motion";
-import { useUserStore } from "../store/user/userStore";
+import { useAuth } from "../context/AuthContext";
 import { useStoriesStore } from "../store/stories/storiesStore";
 import PageTransition from "../components/PageTransition";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Home() {
   const navigate = useNavigate();
-  const { hasCompletedProfile, canCreateStory, isPremium, getRemainingMonthlyStories } = useUserStore();
+  const { hasCompletedProfile, canCreateStory, isPremium, getRemainingMonthlyStories } = useAuth();
   const { generatedStories } = useStoriesStore();
   const { toast } = useToast();
 
