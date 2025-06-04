@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Volume2, ChevronDown, AlertCircle } from 'lucide-react';
 import { getAvailableVoices } from '../services/ai/ttsService';
-import { useUserStore } from '../store/user/userStore';
+import { useAuth } from '../context/AuthContext';
 
 interface Voice {
   id: string;
@@ -22,12 +22,12 @@ export default function VoiceSettings({ onSettingsChange, className = '' }: Voic
   const [isLoading, setIsLoading] = useState(true);
   
   // Obtener selectores del userStore
-  const { 
-    isPremium, 
-    canGenerateVoice, 
-    getRemainingMonthlyVoiceGenerations, 
-    getAvailableVoiceCredits 
-  } = useUserStore();
+  const {
+    isPremium,
+    canGenerateVoice,
+    getRemainingMonthlyVoiceGenerations,
+    getAvailableVoiceCredits
+  } = useAuth();
 
   // Cargar las voces disponibles
   useEffect(() => {

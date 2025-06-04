@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { useUserStore } from '@/store/user/userStore'; // Adjust path if needed
+import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/supabaseClient'; // Adjust path if needed
 import { useToast } from '@/hooks/use-toast'; // Adjust path if needed
 import PageTransition from '@/components/PageTransition'; // Adjust path if needed
@@ -24,14 +24,7 @@ import {
 const SettingsPage: React.FC = () => {
     const navigate = useNavigate();
     const { toast } = useToast();
-    const { user, profileSettings, logoutUser, isPremium } = useUserStore(
-        (state) => ({
-            user: state.user,
-            profileSettings: state.profileSettings,
-            logoutUser: state.logoutUser,
-            isPremium: state.isPremium, // Assuming isPremium selector exists
-        })
-    );
+    const { user, profileSettings, logoutUser, isPremium } = useAuth();
 
     const [isPortalLoading, setIsPortalLoading] = useState(false);
     const [isLogoutLoading, setIsLogoutLoading] = useState(false);

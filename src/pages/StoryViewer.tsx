@@ -8,7 +8,7 @@ import { motion } from "framer-motion";
 import { useStoriesStore } from "../store/stories/storiesStore";
 import { useChaptersStore } from "../store/stories/chapters/chaptersStore";
 import { useChallengesStore } from "../store/stories/challenges/challengesStore";
-import { useUserStore } from "../store/user/userStore"; // Importar para los selectores de límites
+import { useAuth } from "../context/AuthContext";
 import BackButton from "../components/BackButton";
 // import StoryButton from "../components/StoryButton"; // Parece no usarse aquí directamente
 import PageTransition from "../components/PageTransition";
@@ -31,7 +31,7 @@ export default function StoryViewer() {
   const { getChaptersByStoryId } = useChaptersStore();
   const { addChallenge } = useChallengesStore();
   // --- Obtener selectores de límites/permisos del userStore ---
-  const { profileSettings, canContinueStory, canGenerateVoice } = useUserStore();
+  const { profileSettings, canContinueStory, canGenerateVoice } = useAuth();
 
   // Estado local
   const [currentChapterIndex, setCurrentChapterIndex] = useState(0);

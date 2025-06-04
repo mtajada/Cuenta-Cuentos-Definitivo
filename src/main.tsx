@@ -2,25 +2,24 @@ import { createRoot } from 'react-dom/client'
 import { useEffect } from 'react'
 import App from './App.tsx'
 import './index.css'
-import { useUserStore } from './store/user/userStore'
+import { AuthProvider, useAuth } from './context/AuthContext'
 import { initSyncService } from './services/syncService'
 
 // Component to handle authentication check on app load
 const AppWithAuth = () => {
-  const { checkAuth } = useUserStore()
+  const { loading } = useAuth()
 
   useEffect(() => {
-    // Check authentication status when app loads
-    const initAuth = async () => {
-      await checkAuth()
-      // Inicializar el servicio de sincronización después de verificar autenticación
+    if (!loading) {
       initSyncService()
     }
-    
-    initAuth()
-  }, [checkAuth])
+  }, [loading])
 
   return <App />
 }
 
-createRoot(document.getElementById("root")!).render(<AppWithAuth />)
+createRoot(document.getElementById("root")!).render(
+  <AuthProvider>
+    <AppWithAuth />
+  </AuthProvider>
+)

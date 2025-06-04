@@ -3,7 +3,7 @@ import { BookOpen, Sparkles, Headphones, Brain, LogIn, UserPlus, Star, Gift, Zap
 import { useNavigate, Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import PageTransition from "../components/PageTransition";
-import { useUserStore } from "../store/user/userStore";
+import { useAuth } from "../context/AuthContext";
 
 interface FeatureCardProps {
   icon: React.ReactNode;
@@ -14,25 +14,17 @@ interface FeatureCardProps {
 
 export default function Welcome() {
   const navigate = useNavigate();
-  const { checkAuth, user } = useUserStore();
+  const { user, loading } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const checkAuthentication = async () => {
-      try {
-        const isAuthenticated = await checkAuth();
-        if (isAuthenticated) {
-          navigate("/home");
-        }
-      } catch (error) {
-        console.error("Error checking authentication:", error);
-      } finally {
-        setIsLoading(false);
+    if (!loading) {
+      if (user) {
+        navigate("/home");
       }
-    };
-
-    checkAuthentication();
-  }, [checkAuth, navigate]);
+      setIsLoading(false);
+    }
+  }, [loading, user, navigate]);
 
   if (isLoading) {
     return (

@@ -14,13 +14,12 @@ import { STORY_VOICES, PLAYBACK_SPEEDS, CUSTOM_VOICE_MAPPING, PREVIEW_FILES } fr
 import { PreviewVoiceModal } from "@/components/PreviewVoiceModal";
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Howl } from 'howler';
-import { useUserStore } from "../store/user/userStore";
+import { useAuth } from "../context/AuthContext";
 import { toastManager } from "@/lib/utils";
 
 // Configuración del cliente de Supabase
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const user = useUserStore.getState().user;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error("Supabase URL or Anon Key is missing. Check your .env file.");
@@ -69,6 +68,7 @@ const formatTime = (seconds: number): string => {
 export default function StoryAudioPage() {
   const { storyId, chapterId } = useParams<{ storyId: string, chapterId?: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { getStoryById } = useStoriesStore();
   const { getChaptersByStoryId, loadChaptersFromSupabase } = useChaptersStore();
   const {

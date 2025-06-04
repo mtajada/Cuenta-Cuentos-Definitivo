@@ -7,7 +7,7 @@ import { motion } from "framer-motion";
 import { BookOpen } from "lucide-react";
 import { useStoriesStore } from "../store/stories/storiesStore";
 import { useChaptersStore } from "../store/stories/chapters/chaptersStore";
-import { useUserStore } from "../store/user/userStore";
+import { useAuth } from "../context/AuthContext";
 import BackButton from "../components/BackButton";
 import PageTransition from "../components/PageTransition";
 import StoryContinuationOptions from "../components/StoryContinuationOptions";
@@ -24,7 +24,7 @@ export default function StoryContinuation() {
   const location = useLocation();
   const { getStoryById } = useStoriesStore();
   const { getChaptersByStoryId, addChapter } = useChaptersStore();
-  const { canContinueStory } = useUserStore();
+  const { canContinueStory } = useAuth();
 
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingOptions, setIsLoadingOptions] = useState(false);
@@ -87,7 +87,7 @@ export default function StoryContinuation() {
     setContinuationOptions([]);
     try {
       // Obtener profileSettings para pasar childAge y specialNeed
-      const profileSettings = useUserStore.getState().profileSettings;
+      const { profileSettings } = useAuth();
       
       const response = await StoryContinuationService.generateContinuationOptions(
         story, 
