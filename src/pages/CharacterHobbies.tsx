@@ -5,19 +5,32 @@ import { useCharacterStore } from "../store/character/characterStore";
 import BackButton from "../components/BackButton";
 import StoryButton from "../components/StoryButton";
 import PageTransition from "../components/PageTransition";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { HobbyOption } from "../types";
 import { toast } from "sonner";
 
 export default function CharacterHobbies() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { currentCharacter, updateCharacter } = useCharacterStore();
-  const characterName = currentCharacter?.name || "tu personaje";
+  const { currentCharacter, updateCharacter, setCurrentCharacter, savedCharacters } = useCharacterStore();
   
-  // Obtener el parámetro "from" de la URL
+  // Obtener los parámetros de la URL
   const searchParams = new URLSearchParams(location.search);
   const fromManagement = searchParams.get('from') === 'management';
+  const actionCreate = searchParams.get('action') === 'create';
+  const editId = searchParams.get('edit');
+  
+  // Si estamos editando, cargar el personaje correspondiente
+  useEffect(() => {
+    if (editId) {
+      const characterToEdit = savedCharacters.find(char => char.id === editId);
+      if (characterToEdit) {
+        setCurrentCharacter(characterToEdit);
+      }
+    }
+  }, [editId, savedCharacters, setCurrentCharacter]);
+  
+  const characterName = currentCharacter?.name || "tu personaje";
   
   const hobbies: HobbyOption[] = [
     { id: "reading", name: "Leer", icon: <Book /> },
@@ -51,7 +64,11 @@ export default function CharacterHobbies() {
   
   const handleContinue = () => {
     updateCharacter({ hobbies: selectedHobbies });
-    navigate(`/character-personality${fromManagement ? '?from=management' : ''}`);
+    const params = new URLSearchParams();
+    if (fromManagement) params.set('from', 'management');
+    if (actionCreate) params.set('action', 'create');
+    if (editId) params.set('edit', editId);
+    navigate(`/character-personality${params.toString() ? '?' + params.toString() : ''}`);
   };
   
   const container = {
@@ -122,7 +139,13 @@ export default function CharacterHobbies() {
           <div className="flex flex-col sm:flex-row justify-between gap-4 w-full max-w-md mx-auto">
             <button
               type="button"
-              onClick={() => navigate(`/character-name${fromManagement ? '?from=management' : ''}`)}
+              onClick={() => {
+                const params = new URLSearchParams();
+                if (fromManagement) params.set('from', 'management');
+                if (actionCreate) params.set('action', 'create');
+                if (editId) params.set('edit', editId);
+                navigate(`/character-name${params.toString() ? '?' + params.toString() : ''}`);
+              }}
               className="w-full sm:w-[48%] py-3 rounded-2xl font-medium bg-white/70 hover:bg-white/90 text-[#BB79D1] border border-[#BB79D1]/30 shadow-md transition-all"
             >
               Atrás

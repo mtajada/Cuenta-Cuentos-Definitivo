@@ -261,7 +261,7 @@ export const syncStory = async (userId: string, story: Story): Promise<{ success
             moral: story.options.moral,
             genre: story.options.genre,
             duration: story.options.duration,
-            character_id: story.options.character.id,
+            character_id: story.options.characters[0]?.id, // Primary character (first selected)
             additional_details: story.additional_details,
             updated_at: new Date(),
         };

@@ -159,9 +159,11 @@ export default function SavedStories() {
                         <User size={14} className="text-[#7DC4E0]" />
                       </div>
                       <div className="text-[#222] text-sm flex-1">
-                        <span className="font-medium">{story.options.character.name || "Personaje"}</span>
-                        {story.options.character.profession && (
-                          <span className="ml-2 text-[#555]">• {story.options.character.profession}</span>
+                        <span className="font-medium">
+                          {story.options.characters?.map(char => char.name).join(', ') || "Sin personajes"}
+                        </span>
+                        {story.options.characters && story.options.characters.length > 0 && story.options.characters[0].profession && (
+                          <span className="ml-2 text-[#555]">• {story.options.characters[0].profession}</span>
                         )}
                       </div>
                       <div className="flex gap-2">

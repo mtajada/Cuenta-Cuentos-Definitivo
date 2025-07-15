@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Smile, Search, Shield, Brain, Users, Cloud, Feather, CheckSquare, Clock, Compass } from "lucide-react";
 import { motion } from "framer-motion";
@@ -24,15 +24,34 @@ const personalityOptions = [
 export default function CharacterPersonality() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { currentCharacter, updateCharacter } = useCharacterStore();
-  const [selectedPersonalities, setSelectedPersonalities] = useState<string[]>(
-    currentCharacter?.personality ? 
-    currentCharacter.personality.split(',') : []
-  );
+  const { currentCharacter, updateCharacter, setCurrentCharacter, savedCharacters } = useCharacterStore();
   
-  // Obtener el parámetro "from" de la URL
+  // Obtener los parámetros de la URL
   const searchParams = new URLSearchParams(location.search);
   const fromManagement = searchParams.get('from') === 'management';
+  const actionCreate = searchParams.get('action') === 'create';
+  const editId = searchParams.get('edit');
+  
+  // Si estamos editando, cargar el personaje correspondiente
+  useEffect(() => {
+    if (editId) {
+      const characterToEdit = savedCharacters.find(char => char.id === editId);
+      if (characterToEdit) {
+        setCurrentCharacter(characterToEdit);
+      }
+    }
+  }, [editId, savedCharacters, setCurrentCharacter]);
+  
+  const [selectedPersonalities, setSelectedPersonalities] = useState<string[]>([]);
+  
+  // Update selectedPersonalities when currentCharacter changes
+  useEffect(() => {
+    if (currentCharacter?.personality) {
+      setSelectedPersonalities(currentCharacter.personality.split(','));
+    } else {
+      setSelectedPersonalities([]);
+    }
+  }, [currentCharacter]);
   
   const characterName = currentCharacter?.name || "tu personaje";
   
@@ -50,11 +69,19 @@ export default function CharacterPersonality() {
     if (selectedPersonalities.length > 0) {
       updateCharacter({ personality: selectedPersonalities.join(',') });
     }
-    navigate(`/character-profession${fromManagement ? '?from=management' : ''}`);
+    const params = new URLSearchParams();
+    if (fromManagement) params.set('from', 'management');
+    if (actionCreate) params.set('action', 'create');
+    if (editId) params.set('edit', editId);
+    navigate(`/character-profession${params.toString() ? '?' + params.toString() : ''}`);
   };
   
   const handleBack = () => {
-    navigate(`/character-hobbies${fromManagement ? '?from=management' : ''}`);
+    const params = new URLSearchParams();
+    if (fromManagement) params.set('from', 'management');
+    if (actionCreate) params.set('action', 'create');
+    if (editId) params.set('edit', editId);
+    navigate(`/character-hobbies${params.toString() ? '?' + params.toString() : ''}`);
   };
   
   const container = {

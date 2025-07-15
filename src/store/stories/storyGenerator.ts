@@ -26,24 +26,24 @@ export const generateStory = async (options: Partial<StoryOptions>): Promise<Sto
   try {
     const storyId = generateId(); 
     const profileSettings = useUserStore.getState().profileSettings; 
-    const characterForStory = useCharacterStore.getState().currentCharacter; 
+    const selectedCharacters = storyOptionsState.getSelectedCharactersForStory(); 
     const additionalDetails = storyOptionsState.additionalDetails; 
 
     // --- DEBUG: Log detallado de parámetros ANTES de construir payload --- 
     console.log("🔍 DEBUG PRE-PAYLOAD: Datos Perfil ->", JSON.stringify(profileSettings, null, 2));
-    console.log("🔍 DEBUG PRE-PAYLOAD: Datos Personaje ->", JSON.stringify(characterForStory, null, 2));
+    console.log("🔍 DEBUG PRE-PAYLOAD: Personajes Seleccionados ->", JSON.stringify(selectedCharacters, null, 2));
     console.log("🔍 DEBUG PRE-PAYLOAD: Opciones Recibidas (función) ->", JSON.stringify(options, null, 2));
     console.log("🔍 DEBUG PRE-PAYLOAD: Duración (store) ->", storyOptionsState.currentStoryOptions.duration);
     console.log("🔍 DEBUG PRE-PAYLOAD: Detalles Adicionales ->", additionalDetails);
     // --- FIN DEBUG ---
 
     if (!profileSettings) throw new Error("Perfil de usuario no cargado.");
-    if (!characterForStory) throw new Error("Personaje no seleccionado o inválido.");
+    if (!selectedCharacters || selectedCharacters.length === 0) throw new Error("No hay personajes seleccionados.");
 
     // --- Llamada ÚNICA al servicio que invoca la EF 'generate-story' ---
     const payload: GenerateStoryParams = {
       options: {
-        character: characterForStory,
+        characters: selectedCharacters,
         genre: options.genre, 
         moral: options.moral, 
         duration: storyOptionsState.currentStoryOptions.duration, 
@@ -60,10 +60,9 @@ export const generateStory = async (options: Partial<StoryOptions>): Promise<Sto
     // storyResponse ahora es { content: string, title: string }
     console.log(`[storyGenerator_DEBUG] Title received from Service: "${storyResponse.title}"`);
 
-    // Guardar el personaje si es uno nuevo o modificado (asumiendo que save es seguro)
-    // Considera si esto debe hacerse solo si la generación fue exitosa
-    await characterStore.saveCurrentCharacter();
-
+    // Los personajes seleccionados ya están guardados, no necesitamos save individual
+    // Solo guardamos currentCharacter si se usó para creación de personaje nuevo
+    
     // Crear el objeto historia con título y contenido de la respuesta
     const story: Story = {
       id: storyId,
@@ -71,7 +70,7 @@ export const generateStory = async (options: Partial<StoryOptions>): Promise<Sto
       content: storyResponse.content, 
       options: { 
         moral: options.moral || "Ser amable", 
-        character: characterForStory,
+        characters: selectedCharacters,
         genre: options.genre || "aventura",
         duration: options.duration || "medium",
         language: payload.language,

@@ -63,7 +63,7 @@ export function createSystemPrompt(language: string, childAge?: number, specialN
     return base;
 }
 
-// Definición de tipos para las opciones del prompt de usuario (sin cambios respecto a v6.1)
+// Definición de tipos para las opciones del prompt de usuario (actualizado para múltiples personajes)
 interface CharacterOptions {
     name: string;
     profession?: string;
@@ -72,7 +72,7 @@ interface CharacterOptions {
 }
 
 interface UserPromptOptions {
-    character: CharacterOptions;
+    characters: CharacterOptions[];   // Unified: array de personajes (1-4)
     genre: string;
     moral: string;
     duration?: string;
@@ -89,16 +89,42 @@ interface CreateUserPromptParams {
 // El contenido textual de la guía para la IA no cambia, solo el formato de respuesta.
 export function createUserPrompt_JsonFormat({ options, additionalDetails }: CreateUserPromptParams): string {
     console.log(`[Helper v7.0] createUserPrompt_JsonFormat: options=`, options, `details=`, additionalDetails); // Log version actualizada
-    const char = options.character;
     const storyDuration = options.duration || 'medium';
     const language = options.language || 'es';
 
-    // Create base request (sin cambios en el texto respecto a v6.1)
-    let request = `Crea un cuento infantil. Género: ${options.genre}. Moraleja: ${options.moral}. Personaje principal: ${char.name}`;
-    if (char.profession) request += `, profesión: ${char.profession}`;
-    if (char.hobbies?.length) request += `, hobbies: ${char.hobbies.join(', ')}`;
-    if (char.personality) request += `, personalidad: ${char.personality}`;
-    request += `.\n\n`;
+    // Unified character system - always use characters array (1-4 characters)
+    const characters = options.characters || [];
+    const isMultipleCharacters = characters.length > 1;
+
+    // Create base request with character handling
+    let request = `Crea un cuento infantil. Género: ${options.genre}. Moraleja: ${options.moral}. `;
+    
+    if (isMultipleCharacters) {
+        request += `Personajes principales (${characters.length}): `;
+        characters.forEach((char, index) => {
+            request += `${index + 1}. ${char.name}`;
+            if (char.profession) request += `, profesión: ${char.profession}`;
+            if (char.hobbies?.length) request += `, hobbies: ${char.hobbies.join(', ')}`;
+            if (char.personality) request += `, personalidad: ${char.personality}`;
+            if (index < characters.length - 1) request += '; ';
+        });
+        request += `.\n\n`;
+        
+        // Add specific instructions for multiple characters
+        request += `**Instrucciones para múltiples personajes:**\n`;
+        request += `- Asegúrate de que TODOS los personajes tengan participación significativa en la historia.\n`;
+        request += `- Cada personaje debe contribuir de manera única según su profesión, hobbies y personalidad.\n`;
+        request += `- Crea interacciones naturales y dinámicas entre los personajes.\n`;
+        request += `- Mantén la historia enfocada y coherente a pesar de múltiples protagonistas.\n`;
+        request += `- Los personajes deben trabajar juntos hacia la resolución del conflicto central.\n\n`;
+    } else {
+        const char = characters[0];
+        request += `Personaje principal: ${char.name}`;
+        if (char.profession) request += `, profesión: ${char.profession}`;
+        if (char.hobbies?.length) request += `, hobbies: ${char.hobbies.join(', ')}`;
+        if (char.personality) request += `, personalidad: ${char.personality}`;
+        request += `.\n\n`;
+    }
 
     // Content, length and structure instructions (sin cambios en el texto respecto a v6.1)
     request += `**Instrucciones de Contenido, Longitud y Estructura:**\n`;

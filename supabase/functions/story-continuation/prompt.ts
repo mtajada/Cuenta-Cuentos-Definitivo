@@ -11,7 +11,7 @@ export interface CharacterOptions {
 }
 
 export interface StoryOptions {
-    character: CharacterOptions;
+    characters: CharacterOptions[];   // Unified: array de personajes (1-4)
     genre: string;
     moral: string;
     duration?: string; // 'short', 'medium', 'long'
@@ -64,7 +64,22 @@ export function createContinuationOptionsPrompt(
 
     prompt += `\n\n--- CONTEXTO COMPLETO DE LA HISTORIA HASTA AHORA ---`;
     prompt += `\n\n**Historia Original (Título General: "${story.title}")**`;
-    prompt += `\nPersonaje Principal: ${story.options.character.name}.`;
+    
+    // Unified character system - always use characters array
+    const characters = story.options.characters || [];
+    
+    if (characters.length > 1) {
+        prompt += `\nPersonajes Principales (${characters.length}): `;
+        characters.forEach((char, index) => {
+            prompt += `${index + 1}. ${char.name}`;
+            if (char.profession) prompt += ` (${char.profession})`;
+            if (index < characters.length - 1) prompt += ', ';
+        });
+        prompt += `.`;
+    } else if (characters.length === 1) {
+        prompt += `\nPersonaje Principal: ${characters[0].name}.`;
+    }
+    
     prompt += `\n\n**Inicio del Cuento:**\n${story.content}\n`; // Contenido completo de la historia inicial
 
     if (chapters && chapters.length > 0) {
@@ -179,9 +194,30 @@ export function createContinuationPrompt(
 
     prompt += `\n\n--- CONTEXTO COMPLETO DE LA HISTORIA HASTA AHORA ---`;
     prompt += `\n\n**Historia Original (Título General: "${story.title}")**`;
-    prompt += `\nPersonaje Principal: ${story.options.character.name}`;
-    if (story.options.character.profession) prompt += `, Profesión: ${story.options.character.profession}`;
-    if (story.options.character.personality) prompt += `, Personalidad: ${story.options.character.personality}`;
+    
+    // Unified character system - always use characters array
+    const characters = story.options.characters || [];
+    
+    if (characters.length > 1) {
+        prompt += `\nPersonajes Principales (${characters.length}): `;
+        characters.forEach((char, index) => {
+            prompt += `${index + 1}. ${char.name}`;
+            if (char.profession) prompt += `, Profesión: ${char.profession}`;
+            if (char.personality) prompt += `, Personalidad: ${char.personality}`;
+            if (index < characters.length - 1) prompt += '; ';
+        });
+        prompt += `.`;
+        
+        // Add instructions for maintaining multiple character consistency
+        prompt += `\n\n**IMPORTANTE para múltiples personajes:** En este capítulo, asegúrate de que todos los personajes mantengan su consistencia y que cada uno tenga participación relevante según el desarrollo de la historia.`;
+    } else if (characters.length === 1) {
+        const char = characters[0];
+        prompt += `\nPersonaje Principal: ${char.name}`;
+        if (char.profession) prompt += `, Profesión: ${char.profession}`;
+        if (char.personality) prompt += `, Personalidad: ${char.personality}`;
+        prompt += `.`;
+    }
+    
     prompt += `\n\n**Inicio del Cuento:**\n${story.content}\n`; // Contenido completo de la historia inicial
 
     if (chapters && chapters.length > 0) {
@@ -222,7 +258,9 @@ export function createContinuationPrompt(
     prompt += `\n* El objeto JSON debe tener exactamente dos claves (keys): "title" y "content".`;
     prompt += `\n* El valor de la clave "title" debe ser una cadena de texto (string) que contenga ÚNICAMENTE el título generado para este nuevo capítulo, respetando las indicaciones del punto 5 de las "Guías para el Nuevo Capítulo".`;
     prompt += `\n* El valor de la clave "content" debe ser una cadena de texto (string) con TODO el contenido de este nuevo capítulo, comenzando directamente con la primera frase.`;
-    prompt += `\n* Ejemplo del formato JSON esperado: {"title": "El Desafío Inesperado", "content": "Al día siguiente, ${story.options.character.name} se despertó sintiendo una extraña energía en el aire..."}`;
+    // Create example with appropriate character reference
+    const exampleCharacterName = characters.length > 0 ? characters[0].name : 'el protagonista';
+    prompt += `\n* Ejemplo del formato JSON esperado: {"title": "El Desafío Inesperado", "content": "Al día siguiente, ${exampleCharacterName} se despertó sintiendo una extraña energía en el aire..."}`;
     prompt += `\n* NO incluyas NADA antes del carácter '{' que inicia el objeto JSON.`;
     prompt += `\n* NO incluyas NADA después del carácter '}' que finaliza el objeto JSON.`;
     prompt += `\n* Asegúrate de que el JSON sea válido y completo.`;

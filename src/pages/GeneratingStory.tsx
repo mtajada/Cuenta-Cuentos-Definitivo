@@ -55,10 +55,12 @@ export default function GeneratingStory() {
             <p className="font-medium">Estamos personalizando una historia mágica especialmente para ti...</p>
             
             <div className="mt-4 grid grid-cols-3 gap-2">
-              {currentStoryOptions.character && (
+              {currentStoryOptions.characters && currentStoryOptions.characters.length > 0 && (
                 <div className="bg-[#7DC4E0]/20 p-2 rounded-lg border border-[#7DC4E0]/30">
-                  <p className="text-xs font-semibold text-[#7DC4E0]">Personaje</p>
-                  <p className="text-sm truncate">{currentStoryOptions.character.name || "Personaje"}</p>
+                  <p className="text-xs font-semibold text-[#7DC4E0]">Personajes ({currentStoryOptions.characters.length})</p>
+                  <p className="text-sm truncate">
+                    {currentStoryOptions.characters.map(char => char.name).join(', ')}
+                  </p>
                 </div>
               )}
               

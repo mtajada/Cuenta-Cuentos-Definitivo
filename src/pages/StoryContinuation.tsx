@@ -247,10 +247,12 @@ export default function StoryContinuation() {
               <p className="font-medium">Estamos personalizando una continuación mágica para tu historia...</p>
 
               <div className="mt-4 grid grid-cols-3 gap-2">
-                {story?.options?.character && (
+                {story?.options?.characters && story.options.characters.length > 0 && (
                   <div className="bg-[#7DC4E0]/20 p-2 rounded-lg border border-[#7DC4E0]/30">
-                    <p className="text-xs font-semibold text-[#7DC4E0]">Personaje</p>
-                    <p className="text-sm truncate">{story.options.character.name || "Personaje"}</p>
+                    <p className="text-xs font-semibold text-[#7DC4E0]">Personajes ({story.options.characters.length})</p>
+                    <p className="text-sm truncate">
+                      {story.options.characters.map(char => char.name).join(', ')}
+                    </p>
                   </div>
                 )}
 

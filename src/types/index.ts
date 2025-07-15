@@ -51,7 +51,7 @@ export type PartialStoryCharacter = {
 
 export type StoryOptions = {
   moral: string;
-  character: StoryCharacter;
+  characters: StoryCharacter[];  // Unified: array de personajes (1-4)
   genre: string;
   duration: StoryDuration;
   language?: string;

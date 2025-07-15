@@ -31,8 +31,10 @@ export class GenerateStoryService {
       }
       const token = sessionData.session.access_token;
 
-      // DEBUG: Log the exact payload being sent
-      console.log(">>> Payload being sent to generate-story:", JSON.stringify(params, null, 2));
+      // DEBUG: Log the exact payload being sent including character info
+      const charactersInfo = `Characters (${params.options.characters?.length || 0}): ${params.options.characters?.map(c => c.name).join(', ') || 'None'}`;
+      console.log(`>>> Payload being sent to generate-story: ${charactersInfo}`);
+      console.log(">>> Full payload:", JSON.stringify(params, null, 2));
 
       const { data, error } = await supabase.functions.invoke<GenerateStoryResponse>('generate-story', { // Especificar tipo de respuesta <T>
         body: params, // El cuerpo ya contiene las opciones, idioma, etc. y additionalDetails

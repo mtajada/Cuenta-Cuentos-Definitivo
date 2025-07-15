@@ -12,7 +12,7 @@ import { StoryCharacter } from "../types";
 
 export default function CharactersManagement() {
   const navigate = useNavigate();
-  const { savedCharacters, loadCharactersFromSupabase, deleteCharacter, selectCharacter, resetCharacter } = useCharacterStore();
+  const { savedCharacters, loadCharactersFromSupabase, deleteCharacter, resetCharacter } = useCharacterStore();
   const [isLoading, setIsLoading] = useState(true);
   const [characterToDelete, setCharacterToDelete] = useState<StoryCharacter | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -49,8 +49,8 @@ export default function CharactersManagement() {
   };
 
   const handleEditCharacter = (characterId: string) => {
-    selectCharacter(characterId);
-    navigate("/character-name?from=management");
+    // Navegar directamente con el ID del personaje para editar
+    navigate(`/character-name?from=management&edit=${characterId}`);
   };
 
   const handleDeleteClick = (character: StoryCharacter) => {

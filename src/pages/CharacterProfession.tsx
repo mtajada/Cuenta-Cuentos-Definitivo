@@ -6,7 +6,7 @@ import StoryOptionCard from "../components/StoryOptionCard";
 import BackButton from "../components/BackButton";
 import StoryButton from "../components/StoryButton";
 import PageTransition from "../components/PageTransition";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { 
   Rocket, 
@@ -33,16 +33,36 @@ const professions = [
 export default function CharacterProfession() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { currentCharacter, updateCharacter, saveCurrentCharacter } = useCharacterStore();
+  const { currentCharacter, updateCharacter, saveCurrentCharacter, setCurrentCharacter, savedCharacters } = useCharacterStore();
   const { updateStoryOptions } = useStoryOptionsStore();
-  const characterName = currentCharacter?.name || "el personaje";
-  const [selectedProfession, setSelectedProfession] = useState(
-    currentCharacter?.profession || ""
-  );
   
-  // Obtener el parámetro "from" de la URL
+  // Obtener los parámetros de la URL
   const searchParams = new URLSearchParams(location.search);
   const fromManagement = searchParams.get('from') === 'management';
+  const actionCreate = searchParams.get('action') === 'create';
+  const editId = searchParams.get('edit');
+  
+  // Si estamos editando, cargar el personaje correspondiente
+  useEffect(() => {
+    if (editId) {
+      const characterToEdit = savedCharacters.find(char => char.id === editId);
+      if (characterToEdit) {
+        setCurrentCharacter(characterToEdit);
+      }
+    }
+  }, [editId, savedCharacters, setCurrentCharacter]);
+  
+  const characterName = currentCharacter?.name || "el personaje";
+  const [selectedProfession, setSelectedProfession] = useState("");
+  
+  // Update selectedProfession when currentCharacter changes
+  useEffect(() => {
+    if (currentCharacter?.profession) {
+      setSelectedProfession(currentCharacter.profession);
+    } else {
+      setSelectedProfession("");
+    }
+  }, [currentCharacter]);
   
   const handleSelectProfession = (profession: string) => {
     setSelectedProfession(profession);
@@ -61,7 +81,11 @@ export default function CharacterProfession() {
           description: result.error
         });
         // Volver a la página de nombre del personaje para corregir
-        navigate(`/character-name${fromManagement ? '?from=management' : ''}`);
+        const params = new URLSearchParams();
+        if (fromManagement) params.set('from', 'management');
+        if (actionCreate) params.set('action', 'create');
+        if (editId) params.set('edit', editId);
+        navigate(`/character-name${params.toString() ? '?' + params.toString() : ''}`);
         return;
       } else if (result?.error) {
         toast.error("Error al guardar", {
@@ -88,6 +112,11 @@ export default function CharacterProfession() {
         description: "Volviendo a la gestión de personajes"
       });
       navigate("/characters-management");
+    } else if (actionCreate) {
+      toast.success("¡Personaje creado!", {
+        description: "Volviendo a la selección de personajes"
+      });
+      navigate("/character-selection");
     } else {
       toast.success("¡Personaje guardado!", {
         description: "Continuando a la selección de género"
@@ -164,7 +193,13 @@ export default function CharacterProfession() {
           <div className="flex flex-col sm:flex-row justify-between gap-4 w-full max-w-md mx-auto">
             <button
               type="button"
-              onClick={() => navigate(`/character-personality${fromManagement ? '?from=management' : ''}`)}
+              onClick={() => {
+                const params = new URLSearchParams();
+                if (fromManagement) params.set('from', 'management');
+                if (actionCreate) params.set('action', 'create');
+                if (editId) params.set('edit', editId);
+                navigate(`/character-personality${params.toString() ? '?' + params.toString() : ''}`);
+              }}
               className="w-full sm:w-[48%] py-3 rounded-2xl font-medium bg-white/70 hover:bg-white/90 text-[#BB79D1] border border-[#BB79D1]/30 shadow-md transition-all"
             >
               Atrás

@@ -157,29 +157,121 @@ serve(async (req: Request) => {
     let params: any;
     try {
       params = await req.json();
-      console.log(`[${functionVersion}] Params Recibidos:`, params);
-
-      if (!params || typeof params !== 'object' ||
-        !params.options || typeof params.options !== 'object' ||
-        !params.options.character || typeof params.options.character !== 'object' || !params.options.character.name ||
-        typeof params.language !== 'string' || !params.language ||
-        params.childAge === undefined || // childAge puede ser 0, así que undefined es la comprobación correcta
-        typeof params.options.duration !== 'string' || !params.options.duration ||
-        typeof params.options.genre !== 'string' || !params.options.genre ||
-        typeof params.options.moral !== 'string' || !params.options.moral
-      ) {
-        console.error("Validation failed. Missing or invalid fields in params:", {
-          hasOptions: !!params.options,
-          hasCharacter: !!params.options?.character,
-          hasCharacterName: !!params.options?.character?.name,
-          hasLanguage: typeof params.language === 'string' && !!params.language,
-          hasChildAge: params.childAge !== undefined,
-          hasDuration: typeof params.options?.duration === 'string' && !!params.options.duration,
-          hasGenre: typeof params.options?.genre === 'string' && !!params.options.genre,
-          hasMoral: typeof params.options?.moral === 'string' && !!params.options.moral
-        });
-        throw new Error("Parámetros inválidos/incompletos (revisar character.name, language, childAge, options.duration, options.genre, options.moral).");
+      console.log(`[${functionVersion}] Params Recibidos:`, JSON.stringify(params, null, 2));
+      console.log(`[${functionVersion}] Validando estructura básica...`);
+      console.log(`[${functionVersion}] params.language:`, params.language, typeof params.language);
+      console.log(`[${functionVersion}] params.childAge:`, params.childAge, typeof params.childAge);
+      console.log(`[${functionVersion}] params.options:`, params.options);
+      if (params.options) {
+        console.log(`[${functionVersion}] params.options.duration:`, params.options.duration, typeof params.options.duration);
+        console.log(`[${functionVersion}] params.options.genre:`, params.options.genre, typeof params.options.genre);
+        console.log(`[${functionVersion}] params.options.moral:`, params.options.moral, typeof params.options.moral);
+        console.log(`[${functionVersion}] params.options.characters:`, params.options.characters);
+        console.log(`[${functionVersion}] params.options.character:`, params.options.character);
       }
+
+      // More detailed validation with debugging
+      console.log(`[${functionVersion}] Starting detailed validation...`);
+      
+      if (!params) {
+        console.error("[VALIDATION ERROR] params is null/undefined");
+        throw new Error("Parámetros inválidos: datos no recibidos.");
+      }
+      
+      if (typeof params !== 'object') {
+        console.error("[VALIDATION ERROR] params is not an object:", typeof params);
+        throw new Error("Parámetros inválidos: formato incorrecto.");
+      }
+      
+      if (!params.options) {
+        console.error("[VALIDATION ERROR] params.options is missing");
+        throw new Error("Parámetros inválidos: falta 'options'.");
+      }
+      
+      if (typeof params.options !== 'object') {
+        console.error("[VALIDATION ERROR] params.options is not an object:", typeof params.options);
+        throw new Error("Parámetros inválidos: 'options' debe ser un objeto.");
+      }
+      
+      // Validate individual fields with more detailed error messages
+      const errors = [];
+      
+      if (typeof params.language !== 'string' || !params.language) {
+        errors.push('language debe ser un string no vacío');
+        console.error("[VALIDATION ERROR] language:", params.language, typeof params.language);
+      }
+      
+      if (params.childAge === undefined) {
+        errors.push('childAge es requerido');
+        console.error("[VALIDATION ERROR] childAge:", params.childAge);
+      }
+      
+      if (typeof params.options.duration !== 'string' || !params.options.duration) {
+        errors.push('options.duration debe ser un string no vacío');
+        console.error("[VALIDATION ERROR] duration:", params.options.duration, typeof params.options.duration);
+      }
+      
+      if (typeof params.options.genre !== 'string' || !params.options.genre) {
+        errors.push('options.genre debe ser un string no vacío');
+        console.error("[VALIDATION ERROR] genre:", params.options.genre, typeof params.options.genre);
+      }
+      
+      if (typeof params.options.moral !== 'string' || !params.options.moral) {
+        errors.push('options.moral debe ser un string no vacío');
+        console.error("[VALIDATION ERROR] moral:", params.options.moral, typeof params.options.moral);
+      }
+      
+      if (errors.length > 0) {
+        console.error("[VALIDATION ERROR] Basic validation failed:", errors);
+        throw new Error(`Parámetros básicos inválidos: ${errors.join(', ')}.`);
+      }
+      
+      console.log(`[${functionVersion}] Basic validation passed!`);
+
+      // Validate character data - support both legacy (character) and new (characters) formats
+      const hasMultipleCharacters = params.options.characters && Array.isArray(params.options.characters) && params.options.characters.length > 0;
+      const hasSingleCharacter = params.options.character && typeof params.options.character === 'object' && params.options.character.name;
+      
+      if (!hasMultipleCharacters && !hasSingleCharacter) {
+        console.error("Validation failed. No valid character data found:", {
+          hasCharacters: !!params.options.characters,
+          charactersIsArray: Array.isArray(params.options.characters),
+          charactersLength: params.options.characters?.length,
+          hasCharacter: !!params.options.character,
+          hasCharacterName: !!params.options.character?.name
+        });
+        throw new Error("Se requiere al menos un personaje válido (options.character.name o options.characters[] con al menos un elemento).");
+      }
+
+      // Normalize to characters array for internal processing
+      let charactersArray;
+      if (hasMultipleCharacters) {
+        charactersArray = params.options.characters;
+        console.log(`[${functionVersion}] Multiple characters mode: ${charactersArray.length} characters`);
+      } else {
+        charactersArray = [params.options.character];
+        console.log(`[${functionVersion}] Single character mode (legacy): ${params.options.character.name}`);
+      }
+
+      // Validate characters array (1-4 characters)
+      if (charactersArray.length > 4) {
+        throw new Error("Máximo 4 personajes permitidos por historia.");
+      }
+      
+      const invalidCharacters = charactersArray.filter(char => 
+        !char || typeof char !== 'object' || !char.name || typeof char.name !== 'string'
+      );
+      
+      if (invalidCharacters.length > 0) {
+        console.error("Validation failed. Invalid characters found:", invalidCharacters);
+        throw new Error("Todos los personajes deben tener un nombre válido.");
+      }
+      
+      console.log(`[${functionVersion}] Characters validated: ${charactersArray.map(c => c.name).join(', ')}`);
+      
+      // Store normalized characters array for use in prompts
+      params.options.characters = charactersArray;
+    
     } catch (error) {
       console.error(`[${functionVersion}] Failed to parse/validate JSON body for user ${userId}. Error:`, error);
       const message = error instanceof Error ? error.message : "Error desconocido al procesar JSON.";

@@ -19,13 +19,20 @@ declare global {
 export default function CharacterName() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { currentCharacter, updateCharacter, savedCharacters } = useCharacterStore();
+  const { updateCharacter, savedCharacters } = useCharacterStore();
   
-  // Obtener el parámetro "from" de la URL
+  // Obtener los parámetros de la URL
   const searchParams = new URLSearchParams(location.search);
   const fromManagement = searchParams.get('from') === 'management';
+  const actionCreate = searchParams.get('action') === 'create';
+  const editCharacterId = searchParams.get('edit');
   
-  const [name, setName] = useState(currentCharacter?.name || "");
+  // Encontrar el personaje a editar si existe
+  const editingCharacter = editCharacterId 
+    ? savedCharacters.find(char => char.id === editCharacterId)
+    : null;
+  
+  const [name, setName] = useState(editingCharacter?.name || "");
   const [isFocused, setIsFocused] = useState(false);
   const [hasTyped, setHasTyped] = useState(false);
   const [error, setError] = useState("");
@@ -37,7 +44,7 @@ export default function CharacterName() {
     // Si estamos editando un personaje existente, excluir su propio nombre de la validación
     return savedCharacters.some(
       char => char.name.toLowerCase() === nameToCheck.toLowerCase() && 
-              char.id !== currentCharacter.id
+              char.id !== editingCharacter?.id
     );
   };
   
@@ -67,7 +74,11 @@ export default function CharacterName() {
     });
     
     setTimeout(() => {
-      navigate(`/character-hobbies${fromManagement ? '?from=management' : ''}`);
+      const params = new URLSearchParams();
+      if (fromManagement) params.set('from', 'management');
+      if (actionCreate) params.set('action', 'create');
+      if (editCharacterId) params.set('edit', editCharacterId);
+      navigate(`/character-hobbies${params.toString() ? '?' + params.toString() : ''}`);
     }, 1000);
   };
   

@@ -1,7 +1,7 @@
 import { CharacterState } from "../types/storeTypes";
 import { StoryCharacter } from "../../types";
 import { createPersistentStore, registerStoreRefresh } from "../core/createStore";
-import { createDefaultCharacter, generateId } from "../core/utils";
+import { generateId } from "../core/utils";
 import {
   deleteCharacter as deleteSupabaseCharacter,
   getUserCharacters,
@@ -9,14 +9,25 @@ import {
   syncQueue,
 } from "../../services/supabase";
 import { useUserStore } from "../user/userStore";
+import { validateCharacterSelection, validateMultipleCharacterSelection, CHARACTER_LIMITS } from "./characterValidation";
 
 // Estado inicial
 const initialState: Pick<
   CharacterState,
-  "currentCharacter" | "savedCharacters"
+  "savedCharacters" | "selectedCharacters" | "maxCharacters" | "currentCharacter"
 > = {
-  currentCharacter: createDefaultCharacter(),
   savedCharacters: [],
+  selectedCharacters: [],
+  maxCharacters: 4, // Límite máximo de personajes según especificación
+  currentCharacter: {
+    id: "",
+    name: "",
+    hobbies: [],
+    description: "",
+    profession: "",
+    characterType: "",
+    personality: "",
+  },
 };
 
 export const useCharacterStore = createPersistentStore<CharacterState>(
@@ -105,6 +116,10 @@ export const useCharacterStore = createPersistentStore<CharacterState>(
             personality: "",
           }
         });
+      },
+
+      setCurrentCharacter: (character: StoryCharacter) => {
+        set({ currentCharacter: character });
       },
 
       saveCurrentCharacter: async () => {
@@ -216,20 +231,6 @@ export const useCharacterStore = createPersistentStore<CharacterState>(
         }
       },
 
-      selectCharacter: (characterId) =>
-        set((state) => {
-          const character = state.savedCharacters.find((char) =>
-            char.id === characterId
-          );
-
-          if (!character) {
-            return state;
-          }
-
-          return {
-            currentCharacter: character,
-          };
-        }),
 
       deleteCharacter: async (characterId) => {
         const user = useUserStore.getState().user;
@@ -243,10 +244,10 @@ export const useCharacterStore = createPersistentStore<CharacterState>(
           savedCharacters: state.savedCharacters.filter((char) =>
             char.id !== characterId
           ),
-          // Si el personaje actual es el que se elimina, resetearlo
-          currentCharacter: state.currentCharacter.id === characterId 
-            ? createDefaultCharacter() 
-            : state.currentCharacter
+          // También eliminar de selectedCharacters si está seleccionado
+          selectedCharacters: state.selectedCharacters.filter((char) =>
+            char.id !== characterId
+          )
         }));
 
         // Luego sincronizar con Supabase
@@ -282,6 +283,86 @@ export const useCharacterStore = createPersistentStore<CharacterState>(
         
         await loadCharactersFromSupabase(user.id);
       },
+
+      // Multiple character selection functions
+      toggleCharacterSelection: (characterId: string) => {
+        set((state) => {
+          const character = state.savedCharacters.find(char => char.id === characterId);
+          if (!character) {
+            console.warn(`Personaje con ID ${characterId} no encontrado`);
+            return state;
+          }
+
+          const isSelected = state.selectedCharacters.some(char => char.id === characterId);
+          
+          if (isSelected) {
+            // Deseleccionar personaje
+            return {
+              selectedCharacters: state.selectedCharacters.filter(char => char.id !== characterId)
+            };
+          } else {
+            // Validar selección antes de añadir
+            const validation = validateCharacterSelection(state.selectedCharacters, character);
+            
+            if (!validation.isValid) {
+              console.warn(`Error al seleccionar personaje: ${validation.errors.join(", ")}`);
+              return state;
+            }
+            
+            if (validation.warnings.length > 0) {
+              console.info(`Advertencias: ${validation.warnings.join(", ")}`);
+            }
+            
+            return {
+              selectedCharacters: [...state.selectedCharacters, character]
+            };
+          }
+        });
+      },
+
+      clearSelectedCharacters: () => {
+        set({ selectedCharacters: [] });
+      },
+
+      getSelectedCharacters: () => {
+        return get().selectedCharacters;
+      },
+
+      isCharacterSelected: (characterId: string) => {
+        return get().selectedCharacters.some(char => char.id === characterId);
+      },
+
+      canSelectMoreCharacters: () => {
+        const state = get();
+        return state.selectedCharacters.length < state.maxCharacters;
+      },
+
+      setSelectedCharacters: (characters: StoryCharacter[]) => {
+        set((state) => {
+          // Validar la selección múltiple
+          const validation = validateMultipleCharacterSelection(characters);
+          
+          if (!validation.isValid) {
+            console.warn(`Error en selección múltiple: ${validation.errors.join(", ")}`);
+            // Filtrar solo personajes válidos que existen en savedCharacters
+            const validCharacters = characters
+              .filter(char => state.savedCharacters.some(saved => saved.id === char.id))
+              .slice(0, state.maxCharacters);
+            return { selectedCharacters: validCharacters };
+          }
+          
+          if (validation.warnings.length > 0) {
+            console.info(`Advertencias: ${validation.warnings.join(", ")}`);
+          }
+          
+          // Validar que todos los personajes existen en savedCharacters
+          const validCharacters = characters.filter(char => 
+            state.savedCharacters.some(saved => saved.id === char.id)
+          );
+          
+          return { selectedCharacters: validCharacters };
+        });
+      },
     };
   },
   "characters",
@@ -298,3 +379,13 @@ export const reloadCharacters = () => {
 
 // Registrar la función de recarga para que se ejecute cuando cambie el usuario
 registerStoreRefresh("characters", reloadCharacters);
+
+// Re-export validation functions for UI components
+export { 
+  validateCharacterSelection, 
+  validateMultipleCharacterSelection, 
+  validateStoryGeneration,
+  getCharacterSelectionMessage,
+  CHARACTER_LIMITS 
+} from "./characterValidation";
+

@@ -211,8 +211,18 @@ serve(async (req: Request) => {
       if (!story || typeof story !== 'object' || !story_id) {
         throw new Error(`Objeto 'story' (con 'id') inválido/ausente para la acción '${action}'.`);
       }
-      if (!story.content || !story.options || !story.options.character?.name || !story.title) {
-        throw new Error("Datos incompletos en el objeto 'story' recibido (content, options.character.name, title son necesarios).");
+      // Validate story has required content and at least one character
+      const hasCharacterData = (story.options.characters && story.options.characters.length > 0) || story.options.character?.name;
+      if (!story.content || !story.options || !hasCharacterData || !story.title) {
+        console.error("Story validation failed:", {
+          hasContent: !!story.content,
+          hasOptions: !!story.options,
+          hasCharacterData: hasCharacterData,
+          hasTitle: !!story.title,
+          charactersCount: story.options.characters?.length || 0,
+          primaryCharacterName: story.options.characters?.[0]?.name
+        });
+        throw new Error("Datos incompletos en el objeto 'story' recibido (content, options con al menos un personaje, title son necesarios).");
       }
       if (!Array.isArray(chapters)) {
         throw new Error(`Array 'chapters' requerido (puede ser vacío) para la acción '${action}'.`);

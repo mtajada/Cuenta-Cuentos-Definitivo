@@ -33,20 +33,32 @@ export interface UserState {
 }
 
 export interface CharacterState {
-  currentCharacter: StoryCharacter | null;
   savedCharacters: StoryCharacter[];
+  selectedCharacters: StoryCharacter[];
+  maxCharacters: number;
+  currentCharacter: StoryCharacter;
 
   updateCharacter: (updates: Partial<StoryCharacter>) => void;
   resetCharacter: () => void;
-  saveCurrentCharacter: () => Promise<{ success: boolean; error?: any }>;
-  selectCharacter: (characterId: string) => void;
+  setCurrentCharacter: (character: StoryCharacter) => void;
+  saveCurrentCharacter: () => Promise<{ success: boolean; error?: string }>;
   deleteCharacter: (characterId: string) => void;
   loadCharactersFromSupabase: () => Promise<void>;
+  
+  // Multiple character selection functions
+  toggleCharacterSelection: (characterId: string) => void;
+  clearSelectedCharacters: () => void;
+  getSelectedCharacters: () => StoryCharacter[];
+  isCharacterSelected: (characterId: string) => boolean;
+  canSelectMoreCharacters: () => boolean;
+  setSelectedCharacters: (characters: StoryCharacter[]) => void;
 }
 
 export interface StoryOptionsState {
   currentStoryOptions: Partial<StoryOptions>;
   additionalDetails?: string | null;
+  // Multiple character selection support
+  selectedCharacterIds: string[];
 
   updateStoryOptions: (options: Partial<StoryOptions>) => void;
   resetStoryOptions: () => void;
@@ -54,6 +66,11 @@ export interface StoryOptionsState {
   setMoral: (moral: string) => void;
   setGenre: (genre: string) => void;
   setAdditionalDetails: (details?: string | null) => void;
+  
+  // Multiple character selection functions
+  setSelectedCharacterIds: (characterIds: string[]) => void;
+  getSelectedCharactersForStory: () => StoryCharacter[];
+  updateSelectedCharacters: (characters: StoryCharacter[]) => void;
 }
 
 export interface StoriesState {
@@ -126,19 +143,4 @@ export interface AudioState {
   loadAudioFromSupabase: () => Promise<void>;
 }
 
-// Estado combinado para mantener compatibilidad con el código existente
-export interface StoryState
-  extends UserState, StoriesState, ChallengesState, ChaptersState, AudioState {
-  currentStoryOptions: Partial<StoryOptions> & {
-    character?: StoryCharacter;
-  };
-  savedCharacters: StoryCharacter[];
-
-  // Métodos específicos de Character para compatibilidad
-  setCharacterName: (name: string) => void;
-  setCharacterHobbies: (hobbies: string[]) => void;
-  setCharacterDescription: (description: string) => void;
-  setCharacterProfession: (profession: string) => void;
-  setCharacterType: (type: string) => void;
-  setCharacterPersonality: (personality: string) => void;
-}
+// StoryState legacy interface removed - using individual state interfaces instead
