@@ -281,7 +281,6 @@ export default function StoryPdfPreview({
           )}
           
           {/* Progress Bar y Confirmation Dialog - COMENTADOS PARA DEMO */}
-          {/* 
           {generationProgress && (
             <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-center mb-2">
@@ -336,7 +335,6 @@ export default function StoryPdfPreview({
               </div>
             </div>
           )}
-          */}
           
           {error && (
             <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
@@ -381,7 +379,6 @@ export default function StoryPdfPreview({
             </div>
 
             {/* Opción 2: Cuento Ilustrado - COMENTADO PARA DEMO */}
-            {/* 
             <div className="p-4 border border-purple-200 rounded-lg bg-purple-50">
               <div className="flex items-center justify-between">
                 <div className="flex-1">
@@ -417,7 +414,6 @@ export default function StoryPdfPreview({
                 </Button>
               </div>
             </div>
-            */}
           </div>
           
           <div className="flex justify-end">
