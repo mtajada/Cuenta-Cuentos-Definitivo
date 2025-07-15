@@ -11,6 +11,21 @@ import {
 import { useUserStore } from "../user/userStore";
 import { validateCharacterSelection, validateMultipleCharacterSelection, CHARACTER_LIMITS } from "./characterValidation";
 
+/**
+ * Normaliza un personaje asegurando que tenga todos los campos requeridos con valores por defecto
+ */
+const normalizeCharacter = (character: StoryCharacter): StoryCharacter => {
+  return {
+    ...character,
+    characterType: character.characterType || 'Personalizado',
+    profession: character.profession || '',
+    name: character.name || '',
+    hobbies: character.hobbies || [],
+    description: character.description || '',
+    personality: character.personality || '',
+  };
+};
+
 // Estado inicial
 const initialState: Pick<
   CharacterState,
@@ -25,7 +40,7 @@ const initialState: Pick<
     hobbies: [],
     description: "",
     profession: "",
-    characterType: "",
+    characterType: "Personalizado", // Valor por defecto para evitar errores de validación
     personality: "",
   },
 };
@@ -58,9 +73,12 @@ export const useCharacterStore = createPersistentStore<CharacterState>(
         if (success && characters) {
           console.log(`Se encontraron ${characters.length} personajes para usuario ${userId}`);
           
+          // Normalizar todos los personajes para asegurar valores por defecto
+          const normalizedCharacters = characters.map(char => normalizeCharacter(char));
+          
           // Establecer solo los personajes recuperados de Supabase
-          set({ savedCharacters: characters });
-          console.log(`Lista actualizada: ${characters.length} personajes para usuario ${userId}`);
+          set({ savedCharacters: normalizedCharacters });
+          console.log(`Lista actualizada: ${normalizedCharacters.length} personajes normalizados para usuario ${userId}`);
         } else {
           console.log(`No se encontraron personajes para el usuario ${userId} o hubo un error`);
         }
@@ -112,7 +130,7 @@ export const useCharacterStore = createPersistentStore<CharacterState>(
             hobbies: [],
             description: "",
             profession: "",
-            characterType: "",
+            characterType: "Personalizado", // Valor por defecto para evitar errores de validación
             personality: "",
           }
         });
@@ -301,8 +319,11 @@ export const useCharacterStore = createPersistentStore<CharacterState>(
               selectedCharacters: state.selectedCharacters.filter(char => char.id !== characterId)
             };
           } else {
+            // Normalizar personaje antes de validar para asegurar valores por defecto
+            const normalizedCharacter = normalizeCharacter(character);
+            
             // Validar selección antes de añadir
-            const validation = validateCharacterSelection(state.selectedCharacters, character);
+            const validation = validateCharacterSelection(state.selectedCharacters, normalizedCharacter);
             
             if (!validation.isValid) {
               console.warn(`Error al seleccionar personaje: ${validation.errors.join(", ")}`);
@@ -314,7 +335,7 @@ export const useCharacterStore = createPersistentStore<CharacterState>(
             }
             
             return {
-              selectedCharacters: [...state.selectedCharacters, character]
+              selectedCharacters: [...state.selectedCharacters, normalizedCharacter]
             };
           }
         });
@@ -339,13 +360,16 @@ export const useCharacterStore = createPersistentStore<CharacterState>(
 
       setSelectedCharacters: (characters: StoryCharacter[]) => {
         set((state) => {
+          // Normalizar todos los personajes antes de validar
+          const normalizedCharacters = characters.map(char => normalizeCharacter(char));
+          
           // Validar la selección múltiple
-          const validation = validateMultipleCharacterSelection(characters);
+          const validation = validateMultipleCharacterSelection(normalizedCharacters);
           
           if (!validation.isValid) {
             console.warn(`Error en selección múltiple: ${validation.errors.join(", ")}`);
-            // Filtrar solo personajes válidos que existen en savedCharacters
-            const validCharacters = characters
+            // Filtrar solo personajes válidos que existen en savedCharacters y normalizar
+            const validCharacters = normalizedCharacters
               .filter(char => state.savedCharacters.some(saved => saved.id === char.id))
               .slice(0, state.maxCharacters);
             return { selectedCharacters: validCharacters };
@@ -356,7 +380,7 @@ export const useCharacterStore = createPersistentStore<CharacterState>(
           }
           
           // Validar que todos los personajes existen en savedCharacters
-          const validCharacters = characters.filter(char => 
+          const validCharacters = normalizedCharacters.filter(char => 
             state.savedCharacters.some(saved => saved.id === char.id)
           );
           

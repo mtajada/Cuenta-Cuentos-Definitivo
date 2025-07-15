@@ -16,10 +16,7 @@ export const generateStory = async (options: Partial<StoryOptions>): Promise<Sto
   const storiesStore = useStoriesStore.getState();
   const chaptersStore = useChaptersStore.getState(); 
   const characterStore = useCharacterStore.getState();
-  const storyOptionsState = useStoryOptionsStore.getState(); 
-
-  console.log("🔍 DEBUG - Opciones generación historia:", JSON.stringify(options, null, 2));
-  console.log("🔍 DEBUG - Detalles Adicionales:", storyOptionsState.additionalDetails);
+  const storyOptionsState = useStoryOptionsStore.getState();
 
   storiesStore.setIsGeneratingStory(true);
 
@@ -30,11 +27,11 @@ export const generateStory = async (options: Partial<StoryOptions>): Promise<Sto
     const additionalDetails = storyOptionsState.additionalDetails; 
 
     // --- DEBUG: Log detallado de parámetros ANTES de construir payload --- 
-    console.log("🔍 DEBUG PRE-PAYLOAD: Datos Perfil ->", JSON.stringify(profileSettings, null, 2));
-    console.log("🔍 DEBUG PRE-PAYLOAD: Personajes Seleccionados ->", JSON.stringify(selectedCharacters, null, 2));
-    console.log("🔍 DEBUG PRE-PAYLOAD: Opciones Recibidas (función) ->", JSON.stringify(options, null, 2));
-    console.log("🔍 DEBUG PRE-PAYLOAD: Duración (store) ->", storyOptionsState.currentStoryOptions.duration);
-    console.log("🔍 DEBUG PRE-PAYLOAD: Detalles Adicionales ->", additionalDetails);
+    // console.log("🔍 DEBUG PRE-PAYLOAD: Datos Perfil ->", JSON.stringify(profileSettings, null, 2));
+    // console.log("🔍 DEBUG PRE-PAYLOAD: Personajes Seleccionados ->", JSON.stringify(selectedCharacters, null, 2));
+    // console.log("🔍 DEBUG PRE-PAYLOAD: Opciones Recibidas (función) ->", JSON.stringify(options, null, 2));
+    // console.log("🔍 DEBUG PRE-PAYLOAD: Duración (store) ->", storyOptionsState.currentStoryOptions.duration);
+    // console.log("🔍 DEBUG PRE-PAYLOAD: Detalles Adicionales ->", additionalDetails);
     // --- FIN DEBUG ---
 
     if (!profileSettings) throw new Error("Perfil de usuario no cargado.");

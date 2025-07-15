@@ -102,7 +102,29 @@ async function generateContinuationOptions(
       throw new Error("Respuesta vacía de la IA para las opciones.");
     }
 
-    const parsedResponse = JSON.parse(aiResponseContent);
+    // First try: Normal JSON parsing
+    let parsedResponse;
+    try {
+      parsedResponse = JSON.parse(aiResponseContent);
+    } catch (parseError) {
+      console.error(`[${functionVersion}] Failed to parse options JSON. Trying fallback parsing...`);
+      
+      // Fallback: Fix control characters and try again
+      const cleanedContent = aiResponseContent
+        .replace(/[\x00-\x1F\x7F]/g, (match: string) => {
+          if (match === '\n') return '\\n';
+          if (match === '\t') return '\\t';
+          if (match === '\r') return '\\r';
+          return '';
+        });
+      
+      try {
+        parsedResponse = JSON.parse(cleanedContent);
+      } catch (fallbackError) {
+        console.error(`[${functionVersion}] Both normal and fallback JSON parsing failed for options.`);
+        throw new Error("No se pudo parsear la respuesta JSON de opciones de la IA.");
+      }
+    }
 
     if (isValidOptionsResponse(parsedResponse)) {
       console.log(`[${functionVersion}] Opciones JSON parseadas y validadas:`, parsedResponse.options);
@@ -315,6 +337,7 @@ serve(async (req: Request) => {
       let parsedSuccessfully = false;
 
       try {
+        // First try: Normal JSON parsing
         const parsedResponse = JSON.parse(aiResponseContent);
         if (isValidContinuationResponse(parsedResponse)) {
           finalTitle = cleanExtractedText(parsedResponse.title, 'title');
@@ -325,7 +348,47 @@ serve(async (req: Request) => {
           console.warn(`[${functionVersion}] AI continuation response JSON structure invalid. Data:`, parsedResponse);
         }
       } catch (parseError: any) {
-        console.error(`[${functionVersion}] Failed to parse JSON from AI continuation response. Error: ${parseError.message}. Raw: ${aiResponseContent.substring(0, 300)}`);
+        console.error(`[${functionVersion}] Failed to parse JSON from AI continuation response. Error: ${parseError.message}. Trying fallback parsing...`);
+        
+        // Fallback: Fix control characters and try again
+        try {
+          // Clean control characters that cause JSON parsing issues
+          const cleanedContent = aiResponseContent
+            .replace(/[\x00-\x1F\x7F]/g, (match: string) => {
+              // Keep newlines and tabs, escape others
+              if (match === '\n') return '\\n';
+              if (match === '\t') return '\\t';
+              if (match === '\r') return '\\r';
+              return ''; // Remove other control characters
+            });
+          
+          console.log(`[${functionVersion}] Cleaned continuation content (first 300 chars): ${cleanedContent.substring(0, 300)}...`);
+          
+          const parsedResponse = JSON.parse(cleanedContent);
+          if (isValidContinuationResponse(parsedResponse)) {
+            finalTitle = cleanExtractedText(parsedResponse.title, 'title');
+            finalContent = cleanExtractedText(parsedResponse.content, 'content');
+            parsedSuccessfully = true;
+            console.log(`[${functionVersion}] Parsed AI continuation JSON successfully with fallback.`);
+          }
+        } catch (fallbackError) {
+          console.error(`[${functionVersion}] Fallback JSON parsing also failed: ${(fallbackError as Error).message}`);
+          
+          // Last resort: Use regex to extract title and content
+          try {
+            const titleMatch = aiResponseContent.match(/"title"\s*:\s*"([^"]+)"/);
+            const contentMatch = aiResponseContent.match(/"content"\s*:\s*"([^"]+(?:\\.[^"]*)*)/);
+            
+            if (titleMatch && contentMatch) {
+              finalTitle = cleanExtractedText(titleMatch[1], 'title');
+              finalContent = cleanExtractedText(contentMatch[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t'), 'content');
+              parsedSuccessfully = true;
+              console.log(`[${functionVersion}] Extracted continuation content using regex.`);
+            }
+          } catch (regexError) {
+            console.error(`[${functionVersion}] Regex extraction also failed: ${(regexError as Error).message}`);
+          }
+        }
       }
 
       if (!parsedSuccessfully) {

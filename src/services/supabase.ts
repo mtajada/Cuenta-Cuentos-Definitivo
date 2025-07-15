@@ -193,7 +193,7 @@ export const getUserCharacters = async (userId: string): Promise<{ success: bool
             hobbies: char.hobbies || [],
             description: char.description || '',
             profession: char.profession || '',
-            characterType: char.character_type || '',
+            characterType: char.character_type || 'Personalizado',
             personality: char.personality || '',
         })) : [];
 
@@ -311,7 +311,7 @@ export const getUserStories = async (userId: string): Promise<{ success: boolean
                         hobbies: characterData?.hobbies || [],
                         description: characterData?.description || '',
                         profession: characterData?.profession || '',
-                        characterType: characterData?.character_type || '',
+                        characterType: characterData?.character_type || 'Personalizado',
                         personality: characterData?.personality || '',
                     } as StoryCharacter,
                 },

@@ -24,8 +24,6 @@ export const useChaptersStore = createPersistentStore<ChaptersState>(
     },
 
     addChapter: async (storyId, chapter) => {
-      console.log("🚀 ~ addChapter: ~ chapter:", chapter)
-      console.log("🚀 ~ addChapter: ~ storyId:", storyId)
       try {
         // 1. Intentar sincronizar con Supabase PRIMERO
         const { success } = await syncChapter(chapter, storyId);

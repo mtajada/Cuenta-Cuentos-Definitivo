@@ -21,7 +21,7 @@ export const createDefaultCharacter = (): StoryCharacter => {
     hobbies: [],
     description: "",
     profession: "",
-    characterType: "",
+    characterType: "Personalizado", // Valor por defecto para evitar errores de validación
     personality: "",
   }
 };

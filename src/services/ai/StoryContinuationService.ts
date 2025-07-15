@@ -37,7 +37,6 @@ export class StoryContinuationService {
 
     try {
       const jsonBodyString = JSON.stringify(bodyPayload, null, 2); // Pretty print
-      console.log(`[StoryContinuationService_DEBUG] Body payload AFTER stringify (length: ${jsonBodyString?.length}):\n---\n${jsonBodyString}\n---`);
     } catch (stringifyError) {
         console.error('[StoryContinuationService_DEBUG] Error during JSON.stringify:', stringifyError, 'Payload was:', bodyPayload);
         throw new Error('Failed to stringify payload before sending to edge function.'); // Re-throw or handle

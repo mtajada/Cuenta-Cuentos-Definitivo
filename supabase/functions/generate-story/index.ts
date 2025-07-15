@@ -315,6 +315,7 @@ serve(async (req: Request) => {
 
     if (aiResponseContent) {
       try {
+        // First try: Normal JSON parsing
         const storyResult: StoryGenerationResult = JSON.parse(aiResponseContent);
         if (isValidStoryResult(storyResult)) {
           finalTitle = cleanExtractedText(storyResult.title, 'title');
@@ -324,8 +325,48 @@ serve(async (req: Request) => {
         } else {
           console.warn(`[${functionVersion}] AI response JSON structure is invalid. Received: ${aiResponseContent.substring(0, 500)}...`);
         }
-      } catch (parseError) {
-        console.error(`[${functionVersion}] Failed to parse JSON from AI response. Error: ${parseError.message}. Raw content: ${aiResponseContent.substring(0, 500)}...`);
+              } catch (parseError) {
+          console.error(`[${functionVersion}] Failed to parse JSON from AI response. Error: ${(parseError as Error).message}. Trying fallback parsing...`);
+          
+          // Fallback: Fix control characters and try again
+          try {
+            // Clean control characters that cause JSON parsing issues
+            let cleanedContent = aiResponseContent
+              .replace(/[\x00-\x1F\x7F]/g, (match: string) => {
+                // Keep newlines and tabs, escape others
+                if (match === '\n') return '\\n';
+                if (match === '\t') return '\\t';
+                if (match === '\r') return '\\r';
+                return ''; // Remove other control characters
+              });
+            
+            console.log(`[${functionVersion}] Cleaned content (first 300 chars): ${cleanedContent.substring(0, 300)}...`);
+            
+            const storyResult: StoryGenerationResult = JSON.parse(cleanedContent);
+            if (isValidStoryResult(storyResult)) {
+              finalTitle = cleanExtractedText(storyResult.title, 'title');
+              finalContent = cleanExtractedText(storyResult.content, 'content');
+              parsedSuccessfully = true;
+              console.log(`[${functionVersion}] Parsed AI JSON successfully with fallback. Title: "${finalTitle}"`);
+            }
+          } catch (fallbackError) {
+            console.error(`[${functionVersion}] Fallback JSON parsing also failed: ${(fallbackError as Error).message}`);
+            
+            // Last resort: Use regex to extract title and content
+            try {
+              const titleMatch = aiResponseContent.match(/"title"\s*:\s*"([^"]+)"/);
+              const contentMatch = aiResponseContent.match(/"content"\s*:\s*"([^"]+(?:\\.[^"]*)*)/);
+              
+              if (titleMatch && contentMatch) {
+                finalTitle = cleanExtractedText(titleMatch[1], 'title');
+                finalContent = cleanExtractedText(contentMatch[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t'), 'content');
+                parsedSuccessfully = true;
+                console.log(`[${functionVersion}] Extracted content using regex. Title: "${finalTitle}"`);
+              }
+            } catch (regexError) {
+              console.error(`[${functionVersion}] Regex extraction also failed: ${(regexError as Error).message}`);
+            }
+          }
       }
     } else {
       console.error(`[${functionVersion}] AI response was empty or text could not be extracted. Finish Reason: ${finishReason}`);
