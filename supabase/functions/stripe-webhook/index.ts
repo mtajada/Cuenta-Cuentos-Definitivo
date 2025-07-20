@@ -128,19 +128,25 @@ serve(async (req: Request) => {
           const subscriptionId = session.subscription as string;
           console.log(`[WEBHOOK_DEBUG] Retrieving subscription ${subscriptionId}`);
           const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-          // const planId = subscription.items.data[0]?.price.id; // Descomenta si necesitas
+          
           const status = subscription.status;
+          const currentPeriodStart = new Date(subscription.current_period_start * 1000);
           const currentPeriodEnd = new Date(subscription.current_period_end * 1000);
-
+          
           console.log(`[WEBHOOK_INFO] Updating profile for new subscription ${subscription.id} for user ${supabaseUserId}`);
+          console.log(`[WEBHOOK_DEBUG] Subscription details: Status=${status}, Period=${currentPeriodStart.toISOString()} to ${currentPeriodEnd.toISOString()}`);
+          
           const { error } = await supabaseAdmin
             .from('profiles')
             .update({
+              subscription_id: subscription.id, // También mantener este campo si existe en tu esquema
               stripe_subscription_id: subscription.id,
-              subscription_status: status,
-              stripe_customer_id: stripeCustomerId, // Asegurar que esté guardado/actualizado
-              current_period_end: currentPeriodEnd.toISOString(),
-              monthly_voice_generations_used: 0, // Resetear contador de uso
+              subscription_status: status === 'active' ? 'active' : status, // Asegurar que sea 'active' para suscripciones activas
+              stripe_customer_id: stripeCustomerId,
+              period_start_date: currentPeriodStart.toISOString(), // 1. Fecha de inicio del periodo
+              current_period_end: currentPeriodEnd.toISOString(), // 4. Fecha de fin del periodo
+              voice_credits: 20, // 3. Dar 20 créditos de voz al activar premium
+              monthly_voice_generations_used: 0, // Resetear contador mensual
             })
             .eq('id', supabaseUserId);
 
@@ -148,7 +154,7 @@ serve(async (req: Request) => {
             console.error(`[WEBHOOK_ERROR] FAIL: Error updating profile for subscription ${subscription.id}:`, error);
             throw error; // Relanza para el catch general
           } else {
-            console.log(`[WEBHOOK_INFO] OK: Profile updated for new subscription ${subscription.id}.`);
+            console.log(`[WEBHOOK_INFO] OK: Profile updated for new subscription ${subscription.id}. User now has premium with 20 voice credits.`);
           }
 
           // --- Compra Única (Créditos) - CÓDIGO CORREGIDO + DEBUGGING ---

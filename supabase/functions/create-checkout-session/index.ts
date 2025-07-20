@@ -11,9 +11,9 @@ console.log(`[CREATE_CHECKOUT_DEBUG] Function create-checkout-session initializi
 const stripeSecretKey = Deno.env.get('STRIPE_SECRET_KEY');
 if (!stripeSecretKey) {
   console.error("[CREATE_CHECKOUT_ERROR] CRITICAL: STRIPE_SECRET_KEY environment variable is not set.");
-  // Considera lanzar un error si falta
+  throw new Error("STRIPE_SECRET_KEY environment variable is required");
 }
-const stripe = new Stripe(stripeSecretKey!, {
+const stripe = new Stripe(stripeSecretKey, {
   apiVersion: '2023-10-16',
   httpClient: Stripe.createFetchHttpClient(),
 });
@@ -22,7 +22,7 @@ const stripe = new Stripe(stripeSecretKey!, {
 const appBaseUrl = Deno.env.get('APP_BASE_URL');
 if (!appBaseUrl) {
   console.error("[CREATE_CHECKOUT_ERROR] APP_BASE_URL environment variable is not set.");
-  // Considera lanzar un error
+  throw new Error("APP_BASE_URL environment variable is required");
 }
 
 serve(async (req: Request) => {
@@ -62,12 +62,12 @@ serve(async (req: Request) => {
     console.log(`[CREATE_CHECKOUT_DEBUG] Received request to purchase item: "${item}"`);
 
     if (item === 'premium') {
-      priceId = Deno.env.get('PREMIUM_PLAN_PRICE_ID');
+      priceId = Deno.env.get('PREMIUM_PLAN_PRICE_ID') || null;
       mode = 'subscription';
       finalMetadata = { supabase_user_id: user.id };
       console.log(`[CREATE_CHECKOUT_DEBUG] Mode set to 'subscription'. Metadata for subscription_data: ${JSON.stringify(finalMetadata)}`);
     } else if (item === 'credits') {
-      priceId = Deno.env.get('VOICE_CREDITS_PRICE_ID');
+      priceId = Deno.env.get('VOICE_CREDITS_PRICE_ID') || null;
       mode = 'payment';
       // !! VERIFICACIÓN CLAVE !!
       finalMetadata = { supabase_user_id: user.id, item_purchased: 'voice_credits' };
@@ -89,13 +89,21 @@ serve(async (req: Request) => {
     let stripeCustomerId: string;
     const { data: profile, error: profileError } = await supabaseClient
       .from('profiles')
-      .select('stripe_customer_id')
+      .select('stripe_customer_id, subscription_status')
       .eq('id', user.id)
       .maybeSingle();
 
     if (profileError) {
       console.error('[CREATE_CHECKOUT_ERROR] Database error fetching profile:', profileError);
       throw new Error('Error al consultar el perfil del usuario.');
+    }
+
+    // Validar si ya tiene suscripción activa para premium
+    if (item === 'premium' && profile?.subscription_status === 'active') {
+      console.log(`[CREATE_CHECKOUT_DEBUG] User ${user.id} already has active subscription`);
+      return new Response(JSON.stringify({ error: 'Ya tienes una suscripción premium activa.' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     if (profile?.stripe_customer_id) {
@@ -131,6 +139,7 @@ serve(async (req: Request) => {
       mode: mode,
       success_url: `${appBaseUrl}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appBaseUrl}/payment-cancel`,
+      metadata: finalMetadata, // 🔥 CRÍTICO: Metadata en el checkout session
       // Adjunta metadata relevante según el modo
       ...(mode === 'subscription' && {
         subscription_data: { metadata: finalMetadata } // Metadata para suscripciones
@@ -152,9 +161,10 @@ serve(async (req: Request) => {
       status: 200,
     });
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('[CREATE_CHECKOUT_ERROR] Unhandled error in create-checkout-session:', error);
-    return new Response(JSON.stringify({ error: `Error interno del servidor: ${error.message}` }), {
+    const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+    return new Response(JSON.stringify({ error: `Error interno del servidor: ${errorMessage}` }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }

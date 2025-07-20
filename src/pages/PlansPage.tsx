@@ -166,7 +166,8 @@ const PlansPage: React.FC = () => {
                                                         style={{ width: `${Math.min(100, ((profileSettings?.voice_credits || 0) / 20) * 100)}%` }}></div>
                                                 </div>
                                             </div>
-                                            <button
+                                            {/* TODO: Add credits button when the beta of premium is over*/}
+                                            {/* <button
                                                 onClick={() => handleCheckout('credits')}
                                                 disabled={isCheckoutLoading}
                                                 className="w-full py-3 px-4 bg-[#A5D6F6]/70 border border-[#A5D6F6]/60 hover:bg-[#A5D6F6] text-white rounded-2xl font-medium flex justify-center items-center gap-2 shadow-lg transform transition-transform duration-200 hover:scale-[1.02] active:scale-[0.98]"
@@ -179,7 +180,7 @@ const PlansPage: React.FC = () => {
                                                         <span>Comprar Créditos</span>
                                                     </>
                                                 )}
-                                            </button>
+                                            </button> */}
                                         </div>
                                     </motion.div>
                                     {/* Card: Manage Subscription */}
@@ -313,7 +314,6 @@ const PlansPage: React.FC = () => {
                                         >
                                             <Star className="h-4 w-4" />
                                             <span>Premium</span>
-                                            <span className="absolute -top-2 -right-2 bg-[#F6A5B7] text-white text-xs font-bold py-0.5 px-2 rounded-full shadow-md">Próximamente</span>
                                         </button>
                                     </motion.div>
                                 </div>
@@ -336,11 +336,6 @@ const PlansPage: React.FC = () => {
                                                     {activePlan === 'premium' && <Star className="h-5 w-5 text-[#F9DA60]" />}
                                                     Plan {activePlan === 'premium' ? 'Premium' : 'Free'}
                                                 </h2>
-                                                {activePlan === 'premium' && (
-                                                    <span className="bg-[#F6A5B7] text-white px-3 py-1 rounded-full text-sm font-bold">
-                                                        Próximamente
-                                                    </span>
-                                                )}
                                             </div>
                                             {activePlan === 'premium' ? (
                                                 <>
@@ -351,7 +346,7 @@ const PlansPage: React.FC = () => {
                                                             <span className="text-[#222] font-medium">Precio:</span>
                                                         </div>
                                                         <div className="font-bold text-xl text-[#BB79D1] flex items-center gap-1">
-                                                            <span>10€</span>
+                                                            <span>9.98€</span>
                                                             <span className="text-sm font-normal text-[#222] opacity-80">/mes</span>
                                                         </div>
                                                     </div>
@@ -365,13 +360,13 @@ const PlansPage: React.FC = () => {
                                         {activePlan === 'premium' && (
                                             <div className="p-6 pt-4 pb-0">
                                                 <button
-                                                    disabled={true}
-                                                    className="w-full py-3 px-6 bg-gradient-to-r from-[#F9DA60]/60 to-[#F9DA60]/40 text-[#BB79D1] rounded-2xl font-bold flex justify-center items-center gap-2 shadow-lg cursor-not-allowed relative overflow-hidden"
+                                                    onClick={() => handleCheckout('premium')}
+                                                    disabled={isCheckoutLoading}
+                                                    className="w-full py-3 px-6 bg-gradient-to-r from-[#F9DA60]/60 to-[#F9DA60]/40 text-[#BB79D1] rounded-2xl font-bold flex justify-center items-center gap-2 shadow-lg transition-all duration-200 hover:scale-105 hover:bg-[#BB79D1]/90"
                                                 >
                                                     <Star className="h-5 w-5" />
                                                     <span>Hazte Premium Ahora</span>
                                                 </button>
-                                                <p className="text-center text-sm text-[#BB79D1] mt-3 font-medium">Estamos trabajando para ofrecerte esta opción muy pronto</p>
                                             </div>
                                         )}
 
