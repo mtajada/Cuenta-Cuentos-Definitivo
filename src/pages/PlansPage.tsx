@@ -100,7 +100,7 @@ const PlansPage: React.FC = () => {
     const features = [
         { name: 'Historias Generadas', free: '10 / mes', premium: 'Ilimitadas', icon: BookOpen, limited: true },
         { name: 'Continuaciones por Historia', free: '1', premium: 'Ilimitadas', icon: TrendingUp, limited: true },
-        { name: 'Narración con Voz (IA)', free: 'Si (2 / mes)', premium: 'Sí (20/mes incl.)', icon: Mic, limited: true },
+        { name: 'Narración con Voz (IA)', free: 'Si (1 / mes)', premium: 'Sí (10/mes incl.)', icon: Mic, limited: true },
         { name: 'Retos Creativos', free: 'Ilimitados', premium: 'Ilimitados', icon: CheckCircle, limited: false },
     ];
 
@@ -163,7 +163,7 @@ const PlansPage: React.FC = () => {
                                                 </div>
                                                 <div className="h-2 bg-[#E6B7D9]/40 rounded-full overflow-hidden">
                                                     <div className="h-full bg-gradient-to-r from-[#7DC4E0] to-[#BB79D1]"
-                                                        style={{ width: `${Math.min(100, ((profileSettings?.voice_credits || 0) / 20) * 100)}%` }}></div>
+                                                        style={{ width: `${Math.min(100, ((profileSettings?.voice_credits || 0) / 10) * 100)}%` }}></div>
                                                 </div>
                                             </div>
                                             {/* TODO: Add credits button when the beta of premium is over*/}

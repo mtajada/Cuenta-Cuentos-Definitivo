@@ -14,7 +14,7 @@ import {
 import { supabase } from "../../supabaseClient";
 import { useChaptersStore } from '../stories/chapters/chaptersStore';
 
-const PREMIUM_MONTHLY_VOICE_ALLOWANCE = 20; // Max free monthly voice generations for premium
+const PREMIUM_MONTHLY_VOICE_ALLOWANCE = 10; // Max free monthly voice generations for premium
 
 // Estado inicial
 const initialState: Pick<UserState, "user" | "profileSettings" | "intendedRedirectPath"> = {
@@ -173,8 +173,8 @@ export const useUserStore = create<UserState>()(
         const settings = get().profileSettings;
         // Solo aplica a premium, devuelve 0 si no lo es.
         if (!get().isPremium() || !settings) return 0;
-        // Asumiendo 20 generaciones gratis al mes
-        return Math.max(0, 20 - (settings.monthly_voice_generations_used || 0));
+        // 10 generaciones gratis al mes para premium
+        return Math.max(0, PREMIUM_MONTHLY_VOICE_ALLOWANCE - (settings.monthly_voice_generations_used || 0));
       },
 
       getAvailableVoiceCredits: () => {

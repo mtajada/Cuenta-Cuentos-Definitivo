@@ -144,7 +144,7 @@ serve(async (req: Request) => {
               stripe_customer_id: stripeCustomerId,
               period_start_date: currentPeriodStart.toISOString(), // 1. Fecha de inicio del periodo
               current_period_end: currentPeriodEnd.toISOString(), // 4. Fecha de fin del periodo
-              voice_credits: 20, // 3. Dar 20 créditos de voz al activar premium
+              voice_credits: 10, // 3. Dar 10 créditos de voz al activar premium
               monthly_voice_generations_used: 0, // Resetear contador mensual
             })
             .eq('id', supabaseUserId);
@@ -153,7 +153,7 @@ serve(async (req: Request) => {
             console.error(`[WEBHOOK_ERROR] FAIL: Error updating profile for subscription ${subscription.id}:`, error);
             throw error; // Relanza para el catch general
           } else {
-            console.log(`[WEBHOOK_INFO] OK: Profile updated for new subscription ${subscription.id}. User now has premium with 20 voice credits.`);
+            console.log(`[WEBHOOK_INFO] OK: Profile updated for new subscription ${subscription.id}. User now has premium with 10 voice credits.`);
           }
 
           // --- Compra Única (Créditos) - CÓDIGO CORREGIDO + DEBUGGING ---
@@ -208,7 +208,7 @@ serve(async (req: Request) => {
             }
 
             // ¡¡¡ VERIFICA ESTE NÚMERO !!!
-            const creditsToAdd = 20; // Ejemplo: 20 créditos
+            const creditsToAdd = 10; // 10 créditos por compra
             console.log(`[WEBHOOK_INFO] Attempting to add ${creditsToAdd} voice credits to user ${supabaseUserId} via RPC.`);
 
             const { error: creditError } = await supabaseAdmin.rpc('increment_voice_credits', {
