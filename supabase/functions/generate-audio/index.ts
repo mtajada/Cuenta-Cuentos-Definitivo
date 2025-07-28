@@ -27,7 +27,7 @@ if (!supabaseUrl || !serviceRoleKey) {
 const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
 // Constante para el límite mensual (mejor si viene de env vars)
-const PREMIUM_MONTHLY_ALLOWANCE = 20;
+const PREMIUM_MONTHLY_ALLOWANCE = 10;
 
 console.log(`[GENERATE_AUDIO_DEBUG] Function generate-audio initialized successfully.`);
 // --- Fin Configuración ---

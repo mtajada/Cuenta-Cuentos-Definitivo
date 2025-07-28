@@ -77,7 +77,7 @@ The loading of user-specific data from Supabase upon login or app initialization
 *   **Key Selectors (Computed State):**
     *   `isPremium()`: Returns `true` if `subscription_status` indicates an active premium plan ('premium_monthly', 'premium_yearly', 'trialing').
     *   `getRemainingMonthlyStories()`: Calculates remaining stories for free users based on `monthly_stories_generated`.
-    *   `getRemainingMonthlyVoiceGenerations()`: Returns the number of *included* monthly voice generations remaining for premium users (e.g., `20 - monthly_voice_generations_used`). Returns 0 for non-premium users.
+    *   `getRemainingMonthlyVoiceGenerations()`: Returns the number of *included* monthly voice generations remaining for premium users (e.g., `10 - monthly_voice_generations_used`). Returns 0 for non-premium users.
     *   `getAvailableVoiceCredits()`: Returns the number of *purchased* `voice_credits`.
     *   `canGenerateStory()`: Checks if the user (free or premium) has available story generations (monthly limit or purchased credits, though story credits are not fully implemented yet).
     *   `canGenerateVoice()`: Determines if the user can generate voice based on subscription status and voice credits.
@@ -86,7 +86,7 @@ The loading of user-specific data from Supabase upon login or app initialization
     *   `hasCompletedProfile()`: A selector returning `true` if `profileSettings` exists and `profileSettings.has_completed_setup` is true. Used by components like `Home` and `AuthGuard` to check if the user needs to be sent to profile configuration.
 *   **Important Distinction: Monthly Quota vs. Purchased Credits:**
     It's crucial to understand the difference in how voice generation allowances work:
-    *   **Monthly Voice Generations (Premium):** Represented by tracking `monthly_voice_generations_used` against a fixed limit (e.g., 20). This is a *quota* that **resets to 0** at the start of each subscription period (handled by the Stripe webhook). This effectively makes the full quota available again each month. Unused generations from one month **do not roll over** to the next.
+    *   **Monthly Voice Generations (Premium):** Represented by tracking `monthly_voice_generations_used` against a fixed limit (e.g., 10). This is a *quota* that **resets to 0** at the start of each subscription period (handled by the Stripe webhook). This effectively makes the full quota available again each month. Unused generations from one month **do not roll over** to the next.
     *   **Purchased Voice Credits (`voice_credits`):** Represent a *balance* of credits bought separately. These credits **persist** across subscription periods and **do not reset** monthly. They are only consumed when used (either by free users or by premium users who have exhausted their monthly quota). This balance accumulates if more credits are purchased.
 
 *   **Key Actions:**

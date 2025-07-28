@@ -38,9 +38,9 @@ const SettingsPage: React.FC = () => {
     const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
 
     // --- Voice Credits Constants ---
-    const PREMIUM_MONTHLY_VOICE_ALLOWANCE = 20; // O usa el valor correcto si es diferente
-    const VOICE_CREDITS_PACKAGE_AMOUNT = 20; // O usa el valor correcto si es diferente
-    const VOICE_CREDITS_PACKAGE_PRICE_EUR = 10; // O usa el valor correcto si es diferente
+    const PREMIUM_MONTHLY_VOICE_ALLOWANCE = 10; // O usa el valor correcto si es diferente
+    const VOICE_CREDITS_PACKAGE_AMOUNT = 10; // O usa el valor correcto si es diferente
+    const VOICE_CREDITS_PACKAGE_PRICE_EUR = 5.98; // O usa el valor correcto si es diferente
 
     const handleLogout = async () => {
         setIsLogoutLoading(true);
@@ -274,7 +274,7 @@ const SettingsPage: React.FC = () => {
                                         >
                                             <div className="flex items-center gap-2 text-[#BB79D1] font-bold">
                                                 <CreditCard className="h-4 w-4" />
-                                                <span>Comprar 20 créditos más por 10€</span>
+                                                <span>Comprar 10 créditos más por 5.98€</span>
                                             </div>
                                             {isCheckoutLoading ? (
                                                 <div className="h-4 w-4 border-2 border-[#BB79D1] border-t-transparent rounded-full animate-spin"></div>

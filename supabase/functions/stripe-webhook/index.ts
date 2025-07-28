@@ -128,19 +128,24 @@ serve(async (req: Request) => {
           const subscriptionId = session.subscription as string;
           console.log(`[WEBHOOK_DEBUG] Retrieving subscription ${subscriptionId}`);
           const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-          // const planId = subscription.items.data[0]?.price.id; // Descomenta si necesitas
+          
           const status = subscription.status;
+          const currentPeriodStart = new Date(subscription.current_period_start * 1000);
           const currentPeriodEnd = new Date(subscription.current_period_end * 1000);
-
+          
           console.log(`[WEBHOOK_INFO] Updating profile for new subscription ${subscription.id} for user ${supabaseUserId}`);
+          console.log(`[WEBHOOK_DEBUG] Subscription details: Status=${status}, Period=${currentPeriodStart.toISOString()} to ${currentPeriodEnd.toISOString()}`);
+          
           const { error } = await supabaseAdmin
             .from('profiles')
             .update({
-              stripe_subscription_id: subscription.id,
-              subscription_status: status,
-              stripe_customer_id: stripeCustomerId, // Asegurar que esté guardado/actualizado
-              current_period_end: currentPeriodEnd.toISOString(),
-              monthly_voice_generations_used: 0, // Resetear contador de uso
+              subscription_id: subscription.id, // También mantener este campo si existe en tu esquema
+              subscription_status: status === 'active' ? 'active' : status, // Asegurar que sea 'active' para suscripciones activas
+              stripe_customer_id: stripeCustomerId,
+              period_start_date: currentPeriodStart.toISOString(), // 1. Fecha de inicio del periodo
+              current_period_end: currentPeriodEnd.toISOString(), // 4. Fecha de fin del periodo
+              voice_credits: 10, // 3. Dar 10 créditos de voz al activar premium
+              monthly_voice_generations_used: 0, // Resetear contador mensual
             })
             .eq('id', supabaseUserId);
 
@@ -148,7 +153,7 @@ serve(async (req: Request) => {
             console.error(`[WEBHOOK_ERROR] FAIL: Error updating profile for subscription ${subscription.id}:`, error);
             throw error; // Relanza para el catch general
           } else {
-            console.log(`[WEBHOOK_INFO] OK: Profile updated for new subscription ${subscription.id}.`);
+            console.log(`[WEBHOOK_INFO] OK: Profile updated for new subscription ${subscription.id}. User now has premium with 10 voice credits.`);
           }
 
           // --- Compra Única (Créditos) - CÓDIGO CORREGIDO + DEBUGGING ---
@@ -203,7 +208,7 @@ serve(async (req: Request) => {
             }
 
             // ¡¡¡ VERIFICA ESTE NÚMERO !!!
-            const creditsToAdd = 20; // Ejemplo: 20 créditos
+            const creditsToAdd = 10; // 10 créditos por compra
             console.log(`[WEBHOOK_INFO] Attempting to add ${creditsToAdd} voice credits to user ${supabaseUserId} via RPC.`);
 
             const { error: creditError } = await supabaseAdmin.rpc('increment_voice_credits', {
@@ -234,6 +239,12 @@ serve(async (req: Request) => {
           const subscriptionId = invoice.subscription as string;
           console.log(`[WEBHOOK_DEBUG] Retrieving subscription ${subscriptionId} for renewal.`);
           const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+          console.log('Subscription:', subscription);
+          console.log('Periodo actual:', 
+            new Date(subscription.current_period_start * 1000).toISOString(),
+            '→',
+            new Date(subscription.current_period_end   * 1000).toISOString()
+          );
           const currentPeriodEnd = new Date(subscription.current_period_end * 1000);
 
           console.log(`[WEBHOOK_INFO] Resetting monthly usage for user ${supabaseUserId} due to subscription renewal.`);
@@ -300,7 +311,6 @@ serve(async (req: Request) => {
         const { error } = await supabaseAdmin
           .from('profiles')
           .update({
-            stripe_subscription_id: null,
             subscription_status: 'canceled',
             current_period_end: null,
             monthly_voice_generations_used: 0,
