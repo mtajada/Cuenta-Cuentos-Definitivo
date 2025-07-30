@@ -234,32 +234,15 @@ serve(async (req: Request) => {
             const storyId = piMetadata?.story_id;
             const chapterId = piMetadata?.chapter_id;
             const storyTitle = piMetadata?.story_title;
-            const storyAuthor = piMetadata?.story_author;
+            const _storyAuthor = piMetadata?.story_author; // Prefixed with underscore as it's not used
 
             if (!storyId || !chapterId || !storyTitle) {
               console.error(`[WEBHOOK_ERROR] FAIL: Missing required story data in metadata for illustrated story generation.`);
               return new Response(JSON.stringify({ received: true, error: 'Missing story data for generation' }), { status: 200 });
             }
 
-            console.log(`[WEBHOOK_INFO] Starting illustrated story generation for user ${supabaseUserId}, story ${storyId}, chapter ${chapterId}`);
-
-            // Call the illustrated story generation function (content will be fetched from database)
-            const { error: generationError } = await supabaseAdmin.functions.invoke('generate-illustrated-story', {
-              body: {
-                storyId,
-                chapterId,
-                title: storyTitle,
-                author: storyAuthor,
-                userId: supabaseUserId
-              }
-            });
-
-            if (generationError) {
-              console.error(`[WEBHOOK_ERROR] FAIL: Error generating illustrated story for user ${supabaseUserId}:`, generationError);
-              return new Response(JSON.stringify({ received: true, error: 'Failed to generate illustrated story' }), { status: 200 });
-            } else {
-              console.log(`[WEBHOOK_INFO] OK: Illustrated story generation initiated for user ${supabaseUserId} from PI ${paymentIntent.id}.`);
-            }
+            console.log(`[WEBHOOK_INFO] Illustrated story payment processed successfully for user ${supabaseUserId}, story ${storyId}, chapter ${chapterId}`);
+            console.log(`[WEBHOOK_INFO] User will be able to generate illustrated story manually on story page.`);
           } else {
             // Este log ahora nos dirá por qué falló la comparación
             console.log(`[WEBHOOK_INFO] Condition 'itemPurchased === "voice_credits"' or 'illustrated_story' is FALSE. Actual value: "${itemPurchased}". No action taken.`);

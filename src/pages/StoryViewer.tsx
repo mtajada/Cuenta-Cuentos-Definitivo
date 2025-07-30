@@ -90,8 +90,9 @@ export default function StoryViewer() {
     if (storyChapters.length === 0 && fetchedStory.content) {
       console.log("[StoryViewer_DEBUG] No chapters found in store, creating initial chapter from story content.");
       // Crear capítulo inicial si no existe en el store de capítulos
+      // Usar storyId como chapterId para consistencia con el storage de imágenes
       chaptersToSet = [{
-        id: generateId(),
+        id: storyId, // Usar storyId como ID del capítulo inicial para consistencia
         chapterNumber: 1,
         title: fetchedStory.title || "Capítulo 1",
         content: fetchedStory.content,
@@ -297,21 +298,26 @@ export default function StoryViewer() {
         {/* Botón de Volver atrás */}
         <BackButton onClick={handleGoBack} />
 
-        <div className="absolute top-6 right-6 flex space-x-2 z-10">
-          <button
+        <div className="absolute top-6 right-6 flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2 z-10">
+          {/* <button
             onClick={handleShare}
             className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-md border border-white/20 flex items-center justify-center text-[#BB79D1] hover:bg-white/40 hover:scale-105 active:scale-95 transition-all shadow-md"
             aria-label="Compartir"
           >
             <Share className="h-5 w-5" />
-          </button>
+          </button> */}
           <button
             onClick={handlePrint}
-            className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-md border border-white/20 flex items-center justify-center text-[#BB79D1] hover:bg-white/40 hover:scale-105 active:scale-95 transition-all shadow-md"
-            aria-label="Generar PDF"
-            title="Generar PDF del cuento"
+            className="px-4 py-2.5 rounded-full bg-gradient-to-r from-purple-500/30 to-pink-500/30 backdrop-blur-md border border-white/30 flex items-center justify-center text-white hover:from-purple-500/50 hover:to-pink-500/50 hover:scale-105 active:scale-95 transition-all duration-200 shadow-lg hover:shadow-xl group font-semibold text-sm whitespace-nowrap"
+            aria-label="Descargar cuento en PDF"
+            title="Descargar tu cuento en PDF"
           >
-            <FileDown className="h-5 w-5" />
+            <div className="relative mr-2">
+              <FileDown className="h-4 w-4 group-hover:animate-bounce" />
+              <div className="absolute inset-0 bg-white/20 rounded-full scale-0 group-hover:scale-100 group-hover:animate-ping transition-all duration-200"></div>
+            </div>
+            <span className="hidden sm:inline">Descarga tu cuento</span>
+            <span className="sm:hidden">Descargar</span>
           </button>
         </div>
 
@@ -428,7 +434,7 @@ export default function StoryViewer() {
           title={currentChapter?.title || story?.title || "Tu cuento TaleMe!"}
           content={currentChapter?.content || ""}
           storyId={storyId!}
-          chapterId={currentChapter?.id || "1"}
+          chapterId={currentChapter?.id || storyId!}
           paymentSuccess={paymentSuccess}
           sessionId={sessionId}
         />
