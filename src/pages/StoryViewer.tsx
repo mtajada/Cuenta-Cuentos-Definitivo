@@ -47,6 +47,10 @@ export default function StoryViewer() {
   const [isLoadingQuestion, setIsLoadingQuestion] = useState(false);
   const [isGeneratingContinuation, setIsGeneratingContinuation] = useState(false); // Estado de carga para continuación
   const [showPdfPreview, setShowPdfPreview] = useState(false);
+  
+  // States for payment success flow
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
   // --- Permisos derivados del store ---
   // Estos se actualizan reactivamente si el estado del userStore cambia
@@ -115,6 +119,31 @@ export default function StoryViewer() {
     setCurrentChapterIndex(initialIndex);
 
   }, [storyId, location.search, getStoryById, getChaptersByStoryId, navigate, isLoadingStories]); // <- Añadir isLoadingStories como dependencia
+
+  // --- Check for payment success and auto-open PDF modal ---
+  useEffect(() => {
+    const checkPaymentSuccess = () => {
+      const urlParams = new URLSearchParams(location.search);
+      const paymentSuccessParam = urlParams.get('payment_success');
+      const sessionIdParam = urlParams.get('session_id');
+      const chapterIdParam = urlParams.get('chapter_id');
+
+      if (paymentSuccessParam === 'true' && sessionIdParam && chapterIdParam) {
+        console.log('[StoryViewer] Payment success detected, opening PDF modal...');
+        setPaymentSuccess(true);
+        setSessionId(sessionIdParam);
+        setShowPdfPreview(true); // Auto-open PDF modal
+        
+        // Clean URL parameters
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, newUrl);
+      }
+    };
+
+    if (storyId && chapters.length > 0) {
+      checkPaymentSuccess();
+    }
+  }, [storyId, chapters.length, location.search]);
 
   // --- Renderizado Condicional --- (Modificado)
   if (isLoadingStories) {
@@ -400,6 +429,8 @@ export default function StoryViewer() {
           content={currentChapter?.content || ""}
           storyId={storyId!}
           chapterId={currentChapter?.id || "1"}
+          paymentSuccess={paymentSuccess}
+          sessionId={sessionId}
         />
       </div> {/* Fin fondo */}
     </PageTransition>

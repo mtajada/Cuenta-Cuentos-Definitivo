@@ -72,6 +72,20 @@ serve(async (req: Request) => {
       // !! VERIFICACIÓN CLAVE !!
       finalMetadata = { supabase_user_id: user.id, item_purchased: 'voice_credits' };
       console.log(`[CREATE_CHECKOUT_DEBUG] Mode set to 'payment'. Metadata for payment_intent_data: ${JSON.stringify(finalMetadata)}`);
+    } else if (item === 'illustrated_story') {
+      priceId = Deno.env.get('ILLUSTRATED_STORY_PRICE_ID') || null;
+      mode = 'payment';
+      // Metadata for illustrated story purchase (without content to avoid Stripe metadata limit)
+      finalMetadata = { 
+        supabase_user_id: user.id, 
+        item_purchased: 'illustrated_story',
+        story_id: requestBody.storyId,
+        chapter_id: requestBody.chapterId,
+        story_title: requestBody.title,
+        story_author: 'TaleMe App'
+        // Removed story_content to avoid Stripe metadata 500 character limit
+      };
+      console.log(`[CREATE_CHECKOUT_DEBUG] Mode set to 'payment' for illustrated story. Metadata: ${JSON.stringify(finalMetadata)}`);
     } else {
       console.error(`[CREATE_CHECKOUT_ERROR] Invalid item requested: ${item}`);
       return new Response(JSON.stringify({ error: 'Artículo solicitado inválido.' }), {
@@ -137,7 +151,9 @@ serve(async (req: Request) => {
       payment_method_types: ['card'],
       line_items: [{ price: priceId, quantity: 1 }],
       mode: mode,
-      success_url: `${appBaseUrl}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+      success_url: item === 'illustrated_story' 
+        ? `${appBaseUrl}/story/${requestBody.storyId}?payment_success=true&session_id={CHECKOUT_SESSION_ID}&chapter_id=${requestBody.chapterId}`
+        : `${appBaseUrl}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appBaseUrl}/payment-cancel`,
       metadata: finalMetadata, // 🔥 CRÍTICO: Metadata en el checkout session
       // Adjunta metadata relevante según el modo

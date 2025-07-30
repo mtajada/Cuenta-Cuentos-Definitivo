@@ -222,9 +222,47 @@ serve(async (req: Request) => {
             } else {
               console.log(`[WEBHOOK_INFO] OK: Added ${creditsToAdd} voice credits via RPC for user ${supabaseUserId} from PI ${paymentIntent.id}.`);
             }
+          } else if (itemPurchased === 'illustrated_story') {
+            console.log(`[WEBHOOK_DEBUG] Condition 'itemPurchased === "illustrated_story"' is TRUE.`);
+
+            if (paymentIntent.status !== 'succeeded') {
+              console.warn(`[WEBHOOK_WARN] PaymentIntent ${paymentIntent.id} status is ${paymentIntent.status}, not 'succeeded'. Skipping illustrated story generation.`);
+              return new Response(JSON.stringify({ received: true, status: 'payment_not_succeeded' }), { status: 200 });
+            }
+
+            // Extract story data from metadata (content will be fetched from database)
+            const storyId = piMetadata?.story_id;
+            const chapterId = piMetadata?.chapter_id;
+            const storyTitle = piMetadata?.story_title;
+            const storyAuthor = piMetadata?.story_author;
+
+            if (!storyId || !chapterId || !storyTitle) {
+              console.error(`[WEBHOOK_ERROR] FAIL: Missing required story data in metadata for illustrated story generation.`);
+              return new Response(JSON.stringify({ received: true, error: 'Missing story data for generation' }), { status: 200 });
+            }
+
+            console.log(`[WEBHOOK_INFO] Starting illustrated story generation for user ${supabaseUserId}, story ${storyId}, chapter ${chapterId}`);
+
+            // Call the illustrated story generation function (content will be fetched from database)
+            const { error: generationError } = await supabaseAdmin.functions.invoke('generate-illustrated-story', {
+              body: {
+                storyId,
+                chapterId,
+                title: storyTitle,
+                author: storyAuthor,
+                userId: supabaseUserId
+              }
+            });
+
+            if (generationError) {
+              console.error(`[WEBHOOK_ERROR] FAIL: Error generating illustrated story for user ${supabaseUserId}:`, generationError);
+              return new Response(JSON.stringify({ received: true, error: 'Failed to generate illustrated story' }), { status: 200 });
+            } else {
+              console.log(`[WEBHOOK_INFO] OK: Illustrated story generation initiated for user ${supabaseUserId} from PI ${paymentIntent.id}.`);
+            }
           } else {
             // Este log ahora nos dirá por qué falló la comparación
-            console.log(`[WEBHOOK_INFO] Condition 'itemPurchased === "voice_credits"' is FALSE. Actual value: "${itemPurchased}". No credits added.`);
+            console.log(`[WEBHOOK_INFO] Condition 'itemPurchased === "voice_credits"' or 'illustrated_story' is FALSE. Actual value: "${itemPurchased}". No action taken.`);
           }
         }
         break;

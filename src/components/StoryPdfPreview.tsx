@@ -1,9 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "./ui/button";
-import { Loader2, Heart, Palette, FileText, CheckCircle, AlertCircle } from "lucide-react";
+import { Loader2, Heart, Palette, FileText, CheckCircle, AlertCircle, Download } from "lucide-react";
 import { Progress } from "./ui/progress";
 import { APP_CONFIG } from "../config/app";
 import { StoryPdfService, ImageGenerationProgress } from "../services/storyPdfService";
+import { supabase } from "../supabaseClient";
+import { useToast } from "../hooks/use-toast";
+import { useLocation } from "react-router-dom";
 
 interface StoryPdfPreviewProps {
   title: string;
@@ -13,6 +16,8 @@ interface StoryPdfPreviewProps {
   isOpen: boolean;
   storyId: string;
   chapterId: string;
+  paymentSuccess?: boolean;
+  sessionId?: string | null;
 }
 
 export default function StoryPdfPreview({
@@ -22,13 +27,18 @@ export default function StoryPdfPreview({
   onClose,
   isOpen,
   storyId,
-  chapterId
+  chapterId,
+  paymentSuccess: externalPaymentSuccess = false,
+  sessionId: externalSessionId = null
 }: StoryPdfPreviewProps) {
+  const { toast } = useToast();
+  const location = useLocation();
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingIllustrated, setIsGeneratingIllustrated] = useState(false);
   const [isValidatingImages, setIsValidatingImages] = useState(false);
   const [needsImageGeneration, setNeedsImageGeneration] = useState(false);
   const [showConfirmGeneration, setShowConfirmGeneration] = useState(false);
+  const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
   const [imageValidationResult, setImageValidationResult] = useState<{
     canGenerate: boolean;
     reason?: string;
@@ -37,6 +47,16 @@ export default function StoryPdfPreview({
   const [generationProgress, setGenerationProgress] = useState<ImageGenerationProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activePreview, setActivePreview] = useState<'cover' | 'content' | 'backCover'>('cover');
+  
+  // New states for payment success flow
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [generationStatus, setGenerationStatus] = useState<{
+    status: 'pending' | 'processing' | 'completed' | 'failed';
+    message: string;
+    progress?: number;
+  }>({ status: 'pending', message: 'Iniciando generación...' });
+  const [isIllustratedPdfReady, setIsIllustratedPdfReady] = useState(false);
   
   // Reset states when modal opens
   useEffect(() => {
@@ -48,7 +68,200 @@ export default function StoryPdfPreview({
       setGenerationProgress(null);
     }
   }, [isOpen]);
-  
+
+    // Check for payment success when component mounts or external props change
+  useEffect(() => {
+    // First check external props (from StoryViewer)
+    if (externalPaymentSuccess && externalSessionId) {
+      console.log('[StoryPdfPreview] External payment success detected, starting generation...');
+      setPaymentSuccess(true);
+      setSessionId(externalSessionId);
+      startGenerationProcess(externalSessionId);
+      return;
+    }
+
+    // Fallback to URL params (legacy behavior)
+    const checkPaymentSuccess = () => {
+      const urlParams = new URLSearchParams(location.search);
+      const paymentSuccessParam = urlParams.get('payment_success');
+      const sessionIdParam = urlParams.get('session_id');
+      const storyIdParam = urlParams.get('story_id');
+      const chapterIdParam = urlParams.get('chapter_id');
+
+      if (paymentSuccessParam === 'true' && sessionIdParam && 
+          storyIdParam === storyId && chapterIdParam === chapterId) {
+        console.log('[StoryPdfPreview] URL payment success detected, starting generation...');
+        setPaymentSuccess(true);
+        setSessionId(sessionIdParam);
+        startGenerationProcess(sessionIdParam);
+        
+        // Clean URL parameters
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, newUrl);
+      }
+    };
+
+    if (isOpen) {
+      checkPaymentSuccess();
+    }
+  }, [isOpen, location.search, storyId, chapterId, externalPaymentSuccess, externalSessionId]);
+
+  const startGenerationProcess = async (sessionId: string) => {
+    try {
+      // Just verify the payment was successful and enable download button
+      setGenerationStatus({
+        status: 'processing',
+        message: 'Verificando pago exitoso...'
+      });
+
+      // Get session data from Stripe
+      const { data: sessionData, error: sessionError } = await supabase.functions.invoke('get-checkout-session', {
+        body: { sessionId }
+      });
+
+      if (sessionError || !sessionData) {
+        throw new Error('No se pudo verificar el pago');
+      }
+
+      // Payment verified, enable download button
+      setGenerationStatus({
+        status: 'completed',
+        message: '¡Pago verificado! Puedes generar y descargar tu cuento ilustrado.',
+        progress: 100
+      });
+
+      setIsIllustratedPdfReady(true);
+      
+      toast({
+        title: '¡Pago exitoso!',
+        description: 'Ahora puedes generar y descargar tu cuento ilustrado.',
+        variant: 'default'
+      });
+
+    } catch (error) {
+      console.error('Error verificando el pago:', error);
+      setGenerationStatus({
+        status: 'failed',
+        message: 'Error al verificar el pago. Contacta soporte.',
+        progress: 0
+      });
+
+      toast({
+        title: 'Error',
+        description: 'Hubo un problema al verificar tu pago. Contacta soporte.',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleDownloadIllustratedPdf = async () => {
+    try {
+      setGenerationStatus({
+        status: 'processing',
+        message: 'Generando imágenes del cuento...',
+        progress: 10
+      });
+
+      toast({
+        title: 'Generando cuento ilustrado',
+        description: 'Por favor espera mientras generamos tu cuento...',
+        variant: 'default'
+      });
+
+      // Step 1: Generate images
+      setGenerationStatus({
+        status: 'processing',
+        message: 'Generando portada...',
+        progress: 25
+      });
+
+      const { error: generationError } = await supabase.functions.invoke('generate-illustrated-story', {
+        body: {
+          storyId,
+          chapterId,
+          title,
+          author: author || 'TaleMe App',
+          userId: 'temp-user' // We'll get this from session if needed
+        }
+      });
+
+      if (generationError) {
+        throw new Error('Error al generar las imágenes del cuento');
+      }
+
+      setGenerationStatus({
+        status: 'processing',
+        message: 'Creando PDF ilustrado...',
+        progress: 80
+      });
+
+      // Step 2: Generate PDF with images
+      const pdfBlob = await StoryPdfService.generateCompleteIllustratedPdf({
+        title,
+        author,
+        content,
+        storyId,
+        chapterId,
+        onProgress: (progress) => {
+          setGenerationStatus({
+            status: 'processing',
+            message: 'Creando PDF ilustrado...',
+            progress: 80 + (progress.progress * 0.2) // 80% to 100%
+          });
+        }
+      });
+
+      setGenerationStatus({
+        status: 'completed',
+        message: '¡Cuento ilustrado descargado exitosamente!',
+        progress: 100
+      });
+
+      // Download the PDF
+      StoryPdfService.downloadPdf(pdfBlob, title, true);
+      
+      toast({
+        title: '¡Éxito!',
+        description: 'Tu cuento ilustrado se ha descargado correctamente.',
+        variant: 'default'
+      });
+
+      // Reset to allow another download if needed
+      setTimeout(() => {
+        setGenerationStatus({
+          status: 'completed',
+          message: '¡Pago verificado! Puedes generar y descargar tu cuento ilustrado.',
+          progress: 100
+        });
+      }, 3000);
+
+    } catch (error) {
+      console.error('Error generating illustrated PDF:', error);
+      
+      setGenerationStatus({
+        status: 'failed',
+        message: 'Error al generar el cuento ilustrado. Puedes intentar de nuevo.',
+        progress: 0
+      });
+
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'No se pudo generar el cuento ilustrado.',
+        variant: 'destructive'
+      });
+
+      // Reset to allow retry
+      setTimeout(() => {
+        setGenerationStatus({
+          status: 'completed',
+          message: '¡Pago verificado! Puedes generar y descargar tu cuento ilustrado.',
+          progress: 100
+        });
+        setIsIllustratedPdfReady(true);
+      }, 3000);
+    }
+  };
+   
   if (!isOpen) return null;
   
   const handleGenerateStandard = async () => {
@@ -93,7 +306,7 @@ export default function StoryPdfPreview({
         console.log('[StoryPdfPreview] ✅ All required images exist. Proceeding with illustrated PDF generation...');
         await generateIllustratedPdfDirectly();
       } else {
-        // Images missing, show confirmation dialog
+        // Images missing, show confirmation dialog for payment
         console.log('[StoryPdfPreview] ❌ Missing images detected:', validationResult.missingImages);
         setNeedsImageGeneration(true);
         setShowConfirmGeneration(true);
@@ -178,6 +391,38 @@ export default function StoryPdfPreview({
       setError('Ocurrió un error al generar el cuento ilustrado. Por favor intenta nuevamente.');
     } finally {
       setIsGeneratingIllustrated(false);
+    }
+  };
+
+  const handleCheckout = async () => {
+    setIsCheckoutLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('create-checkout-session', {
+        body: JSON.stringify({ 
+          item: 'illustrated_story',
+          storyId,
+          chapterId,
+          title,
+          author
+          // Removed content to avoid Stripe metadata limit
+        }),
+      });
+
+      if (error) throw error;
+
+      if (data?.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error('No se recibió URL de checkout.');
+      }
+    } catch (error: Error | unknown) {
+      console.error('Error creating illustrated story checkout session:', error);
+      toast({ 
+        title: 'Error', 
+        description: `No se pudo iniciar el pago: ${error instanceof Error ? error.message : 'Error desconocido'}`, 
+        variant: 'destructive' 
+      });
+      setIsCheckoutLoading(false);
     }
   };
 
@@ -280,8 +525,7 @@ export default function StoryPdfPreview({
             </div>
           )}
           
-          {/* Progress Bar y Confirmation Dialog - COMENTADOS PARA DEMO */}
-          {/* 
+          {/* Progress Bar y Confirmation Dialog */}
           {generationProgress && (
             <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-center mb-2">
@@ -300,7 +544,63 @@ export default function StoryPdfPreview({
             </div>
           )}
 
-          {showConfirmGeneration && imageValidationResult && !imageValidationResult.canGenerate && (
+          {/* Payment success and generation status */}
+          {paymentSuccess && (
+            <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+              <div className="flex items-start">
+                <CheckCircle className="h-5 w-5 text-green-600 mr-3 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <h4 className="font-medium text-green-800 mb-2">
+                    ¡Pago exitoso!
+                  </h4>
+                  
+                  {generationStatus.status === 'processing' && (
+                    <div className="mb-3">
+                      <div className="flex items-center mb-2">
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin text-blue-600" />
+                        <span className="text-sm text-blue-800">{generationStatus.message}</span>
+                      </div>
+                      {generationStatus.progress && (
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div 
+                            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                            style={{ width: `${generationStatus.progress}%` }}
+                          ></div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {generationStatus.status === 'completed' && (
+                    <div className="mb-3">
+                      <p className="text-sm text-green-700 mb-3">
+                        {generationStatus.message}
+                      </p>
+                      <Button
+                        onClick={handleDownloadIllustratedPdf}
+                        className="bg-purple-600 hover:bg-purple-700 text-white"
+                        size="sm"
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Generar y descargar cuento ilustrado
+                      </Button>
+                    </div>
+                  )}
+
+                  {generationStatus.status === 'failed' && (
+                    <div className="mb-3">
+                      <div className="flex items-center text-red-600">
+                        <AlertCircle className="h-4 w-4 mr-2" />
+                        <span className="text-sm">{generationStatus.message}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showConfirmGeneration && imageValidationResult && !imageValidationResult.canGenerate && !paymentSuccess && (
             <div className="mb-4 p-4 bg-orange-50 border border-orange-200 rounded-lg">
               <div className="flex items-start">
                 <AlertCircle className="h-5 w-5 text-orange-600 mr-3 mt-0.5 flex-shrink-0" />
@@ -312,17 +612,26 @@ export default function StoryPdfPreview({
                     Para generar el cuento ilustrado necesitamos llenarlo de magia con imágenes y color. 
                   </p>
                   <p className="text-sm text-orange-700 mb-4">
-                    Este proceso puede tomar 2-3 minutos. ¿Deseas continuar?
+                    <span  className="font-bold">Este proceso puede tomar 2-3 minutos después de la compra. ¿Deseas continuar con el pago?</span>
                   </p>
                   <div className="flex space-x-3">
                     <Button
-                      onClick={handleConfirmImageGeneration}
-                      disabled={isGeneratingIllustrated}
+                      onClick={handleCheckout}
+                      disabled={isCheckoutLoading}
                       className="bg-orange-600 hover:bg-orange-700 text-white"
                       size="sm"
                     >
-                      <CheckCircle className="h-4 w-4 mr-2" />
-                      Sí, generar imágenes
+                      {isCheckoutLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Procesando...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="h-4 w-4 mr-2" />
+                          Comprar y generar (2.98€)
+                        </>
+                      )}
                     </Button>
                     <Button
                       onClick={handleCancelGeneration}
@@ -336,7 +645,6 @@ export default function StoryPdfPreview({
               </div>
             </div>
           )}
-          */}
           
           {error && (
             <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
@@ -380,8 +688,7 @@ export default function StoryPdfPreview({
               </div>
             </div>
 
-            {/* Opción 2: Cuento Ilustrado - COMENTADO PARA DEMO */}
-            {/* 
+            {/* Opción 2: Cuento Ilustrado */}
             <div className="p-4 border border-purple-200 rounded-lg bg-purple-50">
               <div className="flex items-center justify-between">
                 <div className="flex-1">
@@ -389,7 +696,7 @@ export default function StoryPdfPreview({
                     <Palette className="h-5 w-5 text-purple-600 mr-2" />
                     <h4 className="font-semibold text-purple-800">Cuento Ilustrado</h4>
                     <span className="ml-2 px-2 py-1 bg-purple-100 text-purple-800 text-xs font-medium rounded-full">
-                      8,99€
+                      2.98€
                     </span>
                   </div>
                   <p className="text-sm text-purple-700">
@@ -398,10 +705,15 @@ export default function StoryPdfPreview({
                 </div>
                 <Button
                   onClick={handleGenerateIllustrated}
-                  disabled={isGeneratingIllustrated || isGenerating || isValidatingImages || showConfirmGeneration}
-                  className="ml-4 bg-purple-600 hover:bg-purple-700"
+                  disabled={isGeneratingIllustrated || isGenerating || isValidatingImages || showConfirmGeneration || paymentSuccess}
+                  className={`ml-4 ${paymentSuccess ? 'bg-gray-400 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700'}`}
                 >
-                  {isValidatingImages ? (
+                  {paymentSuccess ? (
+                    <>
+                      <CheckCircle className="mr-2 h-4 w-4" />
+                      Comprado
+                    </>
+                  ) : isValidatingImages ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Validando...
@@ -417,7 +729,6 @@ export default function StoryPdfPreview({
                 </Button>
               </div>
             </div>
-            */}
           </div>
           
           <div className="flex justify-end">
@@ -434,12 +745,3 @@ export default function StoryPdfPreview({
     </div>
   );
 }
-
-// NOTA: Las siguientes funciones están temporalmente comentadas para la demo
-// pero siguen disponibles para cuando se reactive la funcionalidad ilustrada:
-// - handleGenerateIllustrated
-// - handleConfirmImageGeneration
-// - generateIllustratedPdfDirectly
-// - handleCancelGeneration
-// - Estados: isGeneratingIllustrated, isValidatingImages, needsImageGeneration, 
-//   showConfirmGeneration, imageValidationResult, generationProgress
