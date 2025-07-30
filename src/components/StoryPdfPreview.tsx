@@ -57,6 +57,7 @@ export default function StoryPdfPreview({
     progress?: number;
   }>({ status: 'pending', message: 'Iniciando generación...' });
   const [isIllustratedPdfReady, setIsIllustratedPdfReady] = useState(false);
+  const [autoGenerateAfterPayment, setAutoGenerateAfterPayment] = useState(true); // Control auto-generation
   
   // Reset states when modal opens
   useEffect(() => {
@@ -108,7 +109,7 @@ export default function StoryPdfPreview({
 
   const startGenerationProcess = async (sessionId: string) => {
     try {
-      // Just verify the payment was successful and enable download button
+      // Verify the payment was successful and offer immediate generation
       setGenerationStatus({
         status: 'processing',
         message: 'Verificando pago exitoso...'
@@ -123,20 +124,33 @@ export default function StoryPdfPreview({
         throw new Error('No se pudo verificar el pago');
       }
 
-      // Payment verified, enable download button
+      // Payment verified, offer immediate generation
       setGenerationStatus({
         status: 'completed',
-        message: '¡Pago verificado! Puedes generar y descargar tu cuento ilustrado.',
+        message: '¡Pago exitoso! Tu cuento ilustrado está listo para generar.',
         progress: 100
       });
 
       setIsIllustratedPdfReady(true);
       
-      toast({
-        title: '¡Pago exitoso!',
-        description: 'Ahora puedes generar y descargar tu cuento ilustrado.',
-        variant: 'default'
-      });
+      if (autoGenerateAfterPayment) {
+        toast({
+          title: '¡Pago exitoso!',
+          description: 'Generando tu cuento ilustrado automáticamente...',
+          variant: 'default'
+        });
+
+        // Auto-start generation after payment success
+        setTimeout(() => {
+          handleDownloadIllustratedPdf();
+        }, 1500);
+      } else {
+        toast({
+          title: '¡Pago exitoso!',
+          description: '¿Quieres generar tu cuento ilustrado ahora?',
+          variant: 'default'
+        });
+      }
 
     } catch (error) {
       console.error('Error verificando el pago:', error);
@@ -156,81 +170,71 @@ export default function StoryPdfPreview({
 
   const handleDownloadIllustratedPdf = async () => {
     try {
+      // First check if images already exist to determine the approach
       setGenerationStatus({
         status: 'processing',
-        message: 'Generando imágenes del cuento...',
-        progress: 10
+        message: 'Verificando imágenes disponibles...',
+        progress: 5
       });
 
-      toast({
-        title: 'Generando cuento ilustrado',
-        description: 'Por favor espera mientras generamos tu cuento...',
-        variant: 'default'
-      });
+      const validationResult = await StoryPdfService.canGenerateIllustratedPdf(storyId, chapterId);
 
-      // Step 1: Generate images
-      setGenerationStatus({
-        status: 'processing',
-        message: 'Generando portada...',
-        progress: 25
-      });
+      if (validationResult.canGenerate) {
+        // Images exist, use direct PDF generation (faster)
+        console.log('[StoryPdfPreview] Images exist, using direct PDF generation...');
+        toast({
+          title: 'Imágenes encontradas',
+          description: 'Generando PDF con imágenes existentes...',
+          variant: 'default'
+        });
 
-      const { error: generationError } = await supabase.functions.invoke('generate-illustrated-story', {
-        body: {
+        await generateIllustratedPdfDirectly();
+      } else {
+        // Images don't exist, need full generation process
+        console.log('[StoryPdfPreview] Images missing, starting full generation process...');
+        toast({
+          title: 'Generando cuento ilustrado',
+          description: 'Por favor espera mientras generamos tu cuento con imágenes...',
+          variant: 'default'
+        });
+
+        // Generate complete illustrated PDF using StoryPdfService
+        const pdfBlob = await StoryPdfService.generateCompleteIllustratedPdf({
+          title,
+          author,
+          content,
           storyId,
           chapterId,
-          title,
-          author: author || 'TaleMe App',
-          userId: 'temp-user' // We'll get this from session if needed
-        }
-      });
+          onProgress: (progress) => {
+            setGenerationStatus({
+              status: 'processing',
+              message: progress.currentStep,
+              progress: progress.progress
+            });
+          }
+        });
 
-      if (generationError) {
-        throw new Error('Error al generar las imágenes del cuento');
+        setGenerationStatus({
+          status: 'completed',
+          message: '¡Cuento ilustrado descargado exitosamente!',
+          progress: 100
+        });
+
+        // Download the PDF
+        StoryPdfService.downloadPdf(pdfBlob, title, true);
+        
+        toast({
+          title: '¡Éxito!',
+          description: 'Tu cuento ilustrado se ha descargado correctamente.',
+          variant: 'default'
+        });
       }
-
-      setGenerationStatus({
-        status: 'processing',
-        message: 'Creando PDF ilustrado...',
-        progress: 80
-      });
-
-      // Step 2: Generate PDF with images
-      const pdfBlob = await StoryPdfService.generateCompleteIllustratedPdf({
-        title,
-        author,
-        content,
-        storyId,
-        chapterId,
-        onProgress: (progress) => {
-          setGenerationStatus({
-            status: 'processing',
-            message: 'Creando PDF ilustrado...',
-            progress: 80 + (progress.progress * 0.2) // 80% to 100%
-          });
-        }
-      });
-
-      setGenerationStatus({
-        status: 'completed',
-        message: '¡Cuento ilustrado descargado exitosamente!',
-        progress: 100
-      });
-
-      // Download the PDF
-      StoryPdfService.downloadPdf(pdfBlob, title, true);
-      
-      toast({
-        title: '¡Éxito!',
-        description: 'Tu cuento ilustrado se ha descargado correctamente.',
-        variant: 'default'
-      });
 
       // Reset to allow another download if needed
       setTimeout(() => {
         setGenerationStatus({
           status: 'completed',
-          message: '¡Pago verificado! Puedes generar y descargar tu cuento ilustrado.',
+          message: paymentSuccess ? '¡Pago verificado! Puedes generar y descargar tu cuento ilustrado.' : '¡Imágenes encontradas! Tu cuento ilustrado está listo.',
           progress: 100
         });
       }, 3000);
@@ -254,7 +258,7 @@ export default function StoryPdfPreview({
       setTimeout(() => {
         setGenerationStatus({
           status: 'completed',
-          message: '¡Pago verificado! Puedes generar y descargar tu cuento ilustrado.',
+          message: paymentSuccess ? '¡Pago verificado! Puedes generar y descargar tu cuento ilustrado.' : '¡Tu cuento ilustrado está listo para generar.',
           progress: 100
         });
         setIsIllustratedPdfReady(true);
@@ -302,9 +306,26 @@ export default function StoryPdfPreview({
       setImageValidationResult(validationResult);
       
       if (validationResult.canGenerate) {
-        // Images exist, proceed directly with PDF generation
-        console.log('[StoryPdfPreview] ✅ All required images exist. Proceeding with illustrated PDF generation...');
-        await generateIllustratedPdfDirectly();
+        // Images exist, user already paid - proceed directly with PDF generation and download
+        console.log('[StoryPdfPreview] ✅ All required images exist. User already paid. Proceeding with illustrated PDF generation and download...');
+        setPaymentSuccess(true); // Set payment success since images exist
+        setIsIllustratedPdfReady(true);
+        setGenerationStatus({
+          status: 'completed',
+          message: '¡Imágenes encontradas! Tu cuento ilustrado está listo.',
+          progress: 100
+        });
+        
+        // Auto-download the illustrated PDF since payment was already made
+        toast({
+          title: 'Imágenes encontradas',
+          description: 'Generando y descargando tu cuento ilustrado...',
+          variant: 'default'
+        });
+        
+        setTimeout(() => {
+          handleDownloadIllustratedPdf();
+        }, 1000);
       } else {
         // Images missing, show confirmation dialog for payment
         console.log('[StoryPdfPreview] ❌ Missing images detected:', validationResult.missingImages);
@@ -356,16 +377,32 @@ export default function StoryPdfPreview({
   const generateIllustratedPdfDirectly = async () => {
     try {
       setIsGeneratingIllustrated(true);
+      setGenerationStatus({
+        status: 'processing',
+        message: 'Validando imágenes existentes...',
+        progress: 10
+      });
       
       // Validate required images exist in storage using service
       const imageValidation = await StoryPdfService.validateRequiredImages(storyId, chapterId);
       
       if (!imageValidation.allValid) {
         setError(`Faltan imágenes necesarias: ${imageValidation.missingImages.join(', ')}. Por favor, genera las imágenes del cuento primero.`);
+        setGenerationStatus({
+          status: 'failed',
+          message: 'Error: Faltan imágenes necesarias.',
+          progress: 0
+        });
         return;
       }
       
       console.log('[StoryPdfPreview] ✅ All required images validated. Proceeding with illustrated PDF generation...');
+      
+      setGenerationStatus({
+        status: 'processing',
+        message: 'Generando PDF con imágenes existentes...',
+        progress: 50
+      });
       
       // Generate illustrated PDF with validated image URLs
       const pdfBlob = await StoryPdfService.generateIllustratedPdf({
@@ -381,14 +418,31 @@ export default function StoryPdfPreview({
         }
       });
       
+      setGenerationStatus({
+        status: 'completed',
+        message: '¡PDF ilustrado generado exitosamente!',
+        progress: 100
+      });
+      
       // Download illustrated PDF
       StoryPdfService.downloadPdf(pdfBlob, title, true);
+      
+      toast({
+        title: '¡Descarga completada!',
+        description: 'Tu cuento ilustrado se ha descargado correctamente.',
+        variant: 'default'
+      });
       
       if (onClose) onClose();
       
     } catch (err) {
       console.error('[StoryPdfPreview] Error generating illustrated story:', err);
       setError('Ocurrió un error al generar el cuento ilustrado. Por favor intenta nuevamente.');
+      setGenerationStatus({
+        status: 'failed',
+        message: 'Error al generar el PDF ilustrado.',
+        progress: 0
+      });
     } finally {
       setIsGeneratingIllustrated(false);
     }
@@ -576,14 +630,35 @@ export default function StoryPdfPreview({
                       <p className="text-sm text-green-700 mb-3">
                         {generationStatus.message}
                       </p>
-                      <Button
-                        onClick={handleDownloadIllustratedPdf}
-                        className="bg-purple-600 hover:bg-purple-700 text-white"
-                        size="sm"
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        Generar y descargar cuento ilustrado
-                      </Button>
+                      {!autoGenerateAfterPayment && (
+                        <Button
+                          onClick={handleDownloadIllustratedPdf}
+                          className="bg-purple-600 hover:bg-purple-700 text-white"
+                          size="sm"
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          Generar y descargar cuento ilustrado
+                        </Button>
+                      )}
+                      {autoGenerateAfterPayment && !isGeneratingIllustrated && (
+                        <div className="flex space-x-2">
+                          <Button
+                            onClick={handleDownloadIllustratedPdf}
+                            className="bg-purple-600 hover:bg-purple-700 text-white"
+                            size="sm"
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Generar ahora
+                          </Button>
+                          <Button
+                            onClick={() => setAutoGenerateAfterPayment(false)}
+                            variant="outline"
+                            size="sm"
+                          >
+                            Generar después
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   )}
 
