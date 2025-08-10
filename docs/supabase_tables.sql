@@ -124,3 +124,21 @@ CREATE TABLE public.user_voices (
   CONSTRAINT user_voices_pkey PRIMARY KEY (id),
   CONSTRAINT user_voices_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
+
+-- Tabla para PDFs ilustrados generados
+CREATE TABLE public.illustrated_pdfs (
+  id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
+  story_id uuid NOT NULL,
+  chapter_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  title text NOT NULL,
+  author text NULL,
+  pdf_url text NULL,
+  status text NOT NULL DEFAULT 'pending',
+  generated_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT illustrated_pdfs_pkey PRIMARY KEY (id),
+  CONSTRAINT illustrated_pdfs_story_id_fkey FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE,
+  CONSTRAINT illustrated_pdfs_chapter_id_fkey FOREIGN KEY (chapter_id) REFERENCES story_chapters(id) ON DELETE CASCADE,
+  CONSTRAINT illustrated_pdfs_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
+);

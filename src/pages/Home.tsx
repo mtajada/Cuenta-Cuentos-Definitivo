@@ -1,17 +1,19 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from "react-router-dom";
-import { Settings, User, Star, ChevronRight } from "lucide-react";
+import { Settings, User, Star, ChevronRight, BookOpen, Sparkles } from "lucide-react";
 import { motion } from "framer-motion";
 import { useUserStore } from "../store/user/userStore";
 import { useStoriesStore } from "../store/stories/storiesStore";
 import PageTransition from "../components/PageTransition";
 import { useToast } from "@/hooks/use-toast";
+import IllustratedBooksModal from "../components/IllustratedBooksModal";
 
 export default function Home() {
   const navigate = useNavigate();
   const { hasCompletedProfile, canCreateStory, isPremium, getRemainingMonthlyStories } = useUserStore();
   const { generatedStories } = useStoriesStore();
   const { toast } = useToast();
+  const [showIllustratedModal, setShowIllustratedModal] = useState(false);
 
   useEffect(() => {
     const needsProfileSetup = !hasCompletedProfile();
@@ -98,6 +100,326 @@ export default function Home() {
           >
             Generar una Nueva Historia
           </button>
+          
+          {/* Nuevo botón para libros ilustrados con efectos de pulso y magia */}
+          <div className="relative w-full">
+            {/* Estrellas flotantes mágicas */}
+            <motion.div
+              animate={{
+                rotate: 360
+              }}
+              transition={{
+                duration: 20,
+                repeat: Infinity,
+                ease: "linear"
+              }}
+              className="absolute inset-0 pointer-events-none"
+            >
+              {/* Estrella 1 - Top */}
+              <motion.div
+                animate={{
+                  scale: [0.8, 1.2, 0.8],
+                  opacity: [0.6, 1, 0.6]
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  ease: "easeInOut"
+                }}
+                className="absolute -top-3 left-1/2 transform -translate-x-1/2"
+              >
+                <Star className="h-4 w-4 text-yellow-300 fill-yellow-300" />
+              </motion.div>
+              
+              {/* Estrella 2 - Right */}
+              <motion.div
+                animate={{
+                  scale: [0.6, 1, 0.6],
+                  opacity: [0.4, 0.8, 0.4]
+                }}
+                transition={{
+                  duration: 1.5,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: 0.5
+                }}
+                className="absolute top-1/2 -right-4 transform -translate-y-1/2"
+              >
+                <Star className="h-3 w-3 text-pink-300 fill-pink-300" />
+              </motion.div>
+              
+              {/* Estrella 3 - Left */}
+              <motion.div
+                animate={{
+                  scale: [0.7, 1.1, 0.7],
+                  opacity: [0.5, 0.9, 0.5]
+                }}
+                transition={{
+                  duration: 1.8,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: 1
+                }}
+                className="absolute top-1/2 -left-4 transform -translate-y-1/2"
+              >
+                <Star className="h-3 w-3 text-purple-300 fill-purple-300" />
+              </motion.div>
+              
+              {/* Estrella 4 - Bottom */}
+              <motion.div
+                animate={{
+                  scale: [0.5, 1, 0.5],
+                  opacity: [0.3, 0.7, 0.3]
+                }}
+                transition={{
+                  duration: 2.2,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: 1.5
+                }}
+                className="absolute -bottom-3 left-1/2 transform -translate-x-1/2"
+              >
+                <Star className="h-3 w-3 text-blue-300 fill-blue-300" />
+              </motion.div>
+            </motion.div>
+
+            {/* Partículas mágicas flotantes */}
+            {[...Array(6)].map((_, i) => (
+              <motion.div
+                key={i}
+                animate={{
+                  y: [-10, -25, -10],
+                  x: [0, (i % 2 === 0 ? 5 : -5), 0],
+                  opacity: [0, 1, 0],
+                  scale: [0, 1, 0]
+                }}
+                transition={{
+                  duration: 3 + i * 0.5,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: i * 0.7
+                }}
+                className={`absolute w-1 h-1 bg-gradient-to-r from-yellow-300 to-white rounded-full blur-sm`}
+                style={{
+                  left: `${15 + i * 12}%`,
+                  top: `${20 + (i % 3) * 20}%`
+                }}
+              />
+            ))}
+
+            {/* Anillo de pulso exterior */}
+            <motion.div
+              animate={{
+                scale: [1, 1.05, 1],
+                opacity: [0.5, 0.8, 0.5]
+              }}
+              transition={{
+                duration: 2,
+                repeat: Infinity,
+                ease: "easeInOut"
+              }}
+              className="absolute inset-0 bg-gradient-to-r from-purple-400 to-pink-400 rounded-2xl blur-sm"
+            ></motion.div>
+            
+            {/* Segundo anillo de pulso */}
+            <motion.div
+              animate={{
+                scale: [1, 1.08, 1],
+                opacity: [0.3, 0.6, 0.3]
+              }}
+              transition={{
+                duration: 2.5,
+                repeat: Infinity,
+                ease: "easeInOut",
+                delay: 0.5
+              }}
+              className="absolute inset-0 bg-gradient-to-r from-yellow-400 to-orange-400 rounded-2xl blur-md"
+            ></motion.div>
+
+            <motion.button
+              animate={{
+                scale: [1, 1.02, 1],
+                boxShadow: [
+                  "0 10px 25px rgba(168, 85, 247, 0.4)",
+                  "0 15px 35px rgba(168, 85, 247, 0.6)",
+                  "0 10px 25px rgba(168, 85, 247, 0.4)"
+                ]
+              }}
+              transition={{
+                duration: 1.8,
+                repeat: Infinity,
+                ease: "easeInOut"
+              }}
+              whileHover={{ 
+                scale: 1.03,
+                boxShadow: "0 20px 40px rgba(168, 85, 247, 0.7)"
+              }}
+              whileTap={{ scale: 0.98 }}
+              className="relative w-full py-4 rounded-2xl text-white text-lg font-semibold transition-all duration-200 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 overflow-hidden z-10"
+              onClick={() => setShowIllustratedModal(true)}
+            >
+              {/* Efectos de brillo internos */}
+              <motion.div
+                animate={{
+                  opacity: [0.2, 0.4, 0.2],
+                  x: [-100, 100]
+                }}
+                transition={{
+                  duration: 3,
+                  repeat: Infinity,
+                  ease: "easeInOut"
+                }}
+                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent skew-x-12"
+              ></motion.div>
+              
+              <motion.div
+                animate={{
+                  opacity: [0.3, 0.6, 0.3]
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  ease: "easeInOut"
+                }}
+                className="absolute inset-0 bg-gradient-to-r from-yellow-400/20 to-orange-400/20"
+              ></motion.div>
+
+              <div className="relative flex items-center justify-center space-x-2">
+                {/* Icono de libro con efecto mágico */}
+                <div className="relative">
+                  <motion.div
+                    animate={{
+                      rotate: [0, 10, -5, 0],
+                      scale: [1, 1.1, 1]
+                    }}
+                    transition={{
+                      duration: 2.5,
+                      repeat: Infinity,
+                      ease: "easeInOut"
+                    }}
+                  >
+                    <BookOpen className="h-5 w-5" />
+                  </motion.div>
+                  
+                  {/* Sparkles alrededor del icono */}
+                  <motion.div
+                    animate={{
+                      scale: [0, 1, 0],
+                      rotate: [0, 180]
+                    }}
+                    transition={{
+                      duration: 2,
+                      repeat: Infinity,
+                      ease: "easeInOut",
+                      delay: 0.3
+                    }}
+                    className="absolute -top-1 -right-1"
+                  >
+                    <Sparkles className="h-3 w-3 text-yellow-300" />
+                  </motion.div>
+                  
+                  <motion.div
+                    animate={{
+                      scale: [0, 1, 0],
+                      rotate: [0, -180]
+                    }}
+                    transition={{
+                      duration: 1.8,
+                      repeat: Infinity,
+                      ease: "easeInOut",
+                      delay: 1
+                    }}
+                    className="absolute -bottom-1 -left-1"
+                  >
+                    <Sparkles className="h-2 w-2 text-pink-300" />
+                  </motion.div>
+                </div>
+
+                <span className="font-bold">Libros Ilustrados</span>
+                
+                {/* Indicador NEW pulsante con estrellas */}
+                <motion.div
+                  animate={{ 
+                    scale: [1, 1.3, 1],
+                    rotate: [0, 360]
+                  }}
+                  transition={{ 
+                    duration: 2, 
+                    repeat: Infinity,
+                    ease: "easeInOut"
+                  }}
+                  className="flex items-center relative"
+                >
+                  <motion.div
+                    animate={{
+                      boxShadow: [
+                        "0 0 0 0 rgba(255, 255, 0, 0.7)",
+                        "0 0 0 6px rgba(255, 255, 0, 0)",
+                        "0 0 0 0 rgba(255, 255, 0, 0)"
+                      ]
+                    }}
+                    transition={{
+                      duration: 1.5,
+                      repeat: Infinity,
+                      ease: "easeOut"
+                    }}
+                    className="w-2 h-2 bg-yellow-300 rounded-full"
+                  ></motion.div>
+                  
+                  {/* Mini estrellas alrededor del indicador */}
+                  <motion.div
+                    animate={{
+                      scale: [0, 1, 0],
+                      x: [0, 8, 0],
+                      y: [0, -8, 0]
+                    }}
+                    transition={{
+                      duration: 2,
+                      repeat: Infinity,
+                      ease: "easeInOut"
+                    }}
+                    className="absolute"
+                  >
+                    <div className="w-1 h-1 bg-white rounded-full"></div>
+                  </motion.div>
+                  
+                  <motion.div
+                    animate={{
+                      scale: [0, 1, 0],
+                      x: [0, -6, 0],
+                      y: [0, 6, 0]
+                    }}
+                    transition={{
+                      duration: 2,
+                      repeat: Infinity,
+                      ease: "easeInOut",
+                      delay: 0.5
+                    }}
+                    className="absolute"
+                  >
+                    <div className="w-1 h-1 bg-yellow-100 rounded-full"></div>
+                  </motion.div>
+                </motion.div>
+              </div>
+              
+              {/* Badge "NUEVO" */}
+              <motion.div
+                animate={{
+                  scale: [1, 1.1, 1],
+                  rotate: [0, 2, -2, 0]
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  ease: "easeInOut"
+                }}
+                className="absolute -top-1 -right-1 bg-yellow-400 text-purple-900 text-xs font-bold px-2 py-1 rounded-full shadow-lg"
+              >
+                NUEVO
+              </motion.div>
+            </motion.button>
+          </div>
+
           <button
             className="w-full py-4 rounded-2xl text-white text-lg font-semibold shadow-lg transition-all duration-200 bg-[#f7c59f] hover:bg-[#ffd7ba]"
             onClick={() => navigate("/characters-management")}
@@ -113,6 +435,12 @@ export default function Home() {
             </button>
           )}
         </div>
+
+        {/* Modal de libros ilustrados */}
+        <IllustratedBooksModal
+          isOpen={showIllustratedModal}
+          onClose={() => setShowIllustratedModal(false)}
+        />
       </div>
     </PageTransition>
   );

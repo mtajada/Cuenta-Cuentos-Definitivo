@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useCallback } from "react"; // Añadido useCallback
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { Share, Printer, Volume2, Home, Award, BookOpen, ChevronLeft, ChevronRight, AlertCircle, FileText, FileDown } from "lucide-react";
+import { Share, Printer, Volume2, Home, Award, BookOpen, ChevronLeft, ChevronRight, AlertCircle, FileText, FileDown, Star, Sparkles } from "lucide-react";
 import { motion } from "framer-motion";
 import { useStoriesStore } from "../store/stories/storiesStore";
 import { useChaptersStore } from "../store/stories/chapters/chaptersStore";
@@ -47,6 +47,10 @@ export default function StoryViewer() {
   const [isLoadingQuestion, setIsLoadingQuestion] = useState(false);
   const [isGeneratingContinuation, setIsGeneratingContinuation] = useState(false); // Estado de carga para continuación
   const [showPdfPreview, setShowPdfPreview] = useState(false);
+  
+  // States for payment success flow
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
   // --- Permisos derivados del store ---
   // Estos se actualizan reactivamente si el estado del userStore cambia
@@ -86,8 +90,9 @@ export default function StoryViewer() {
     if (storyChapters.length === 0 && fetchedStory.content) {
       console.log("[StoryViewer_DEBUG] No chapters found in store, creating initial chapter from story content.");
       // Crear capítulo inicial si no existe en el store de capítulos
+      // Usar storyId como chapterId para consistencia con el storage de imágenes
       chaptersToSet = [{
-        id: generateId(),
+        id: storyId, // Usar storyId como ID del capítulo inicial para consistencia
         chapterNumber: 1,
         title: fetchedStory.title || "Capítulo 1",
         content: fetchedStory.content,
@@ -115,6 +120,31 @@ export default function StoryViewer() {
     setCurrentChapterIndex(initialIndex);
 
   }, [storyId, location.search, getStoryById, getChaptersByStoryId, navigate, isLoadingStories]); // <- Añadir isLoadingStories como dependencia
+
+  // --- Check for payment success and auto-open PDF modal ---
+  useEffect(() => {
+    const checkPaymentSuccess = () => {
+      const urlParams = new URLSearchParams(location.search);
+      const paymentSuccessParam = urlParams.get('payment_success');
+      const sessionIdParam = urlParams.get('session_id');
+      const chapterIdParam = urlParams.get('chapter_id');
+
+      if (paymentSuccessParam === 'true' && sessionIdParam && chapterIdParam) {
+        console.log('[StoryViewer] Payment success detected, opening PDF modal...');
+        setPaymentSuccess(true);
+        setSessionId(sessionIdParam);
+        setShowPdfPreview(true); // Auto-open PDF modal
+        
+        // Clean URL parameters
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, newUrl);
+      }
+    };
+
+    if (storyId && chapters.length > 0) {
+      checkPaymentSuccess();
+    }
+  }, [storyId, chapters.length, location.search]);
 
   // --- Renderizado Condicional --- (Modificado)
   if (isLoadingStories) {
@@ -268,22 +298,242 @@ export default function StoryViewer() {
         {/* Botón de Volver atrás */}
         <BackButton onClick={handleGoBack} />
 
-        <div className="absolute top-6 right-6 flex space-x-2 z-10">
-          <button
+        <div className="absolute top-6 right-6 flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2 z-10">
+          {/* <button
             onClick={handleShare}
             className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-md border border-white/20 flex items-center justify-center text-[#BB79D1] hover:bg-white/40 hover:scale-105 active:scale-95 transition-all shadow-md"
             aria-label="Compartir"
           >
             <Share className="h-5 w-5" />
-          </button>
-          <button
-            onClick={handlePrint}
-            className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-md border border-white/20 flex items-center justify-center text-[#BB79D1] hover:bg-white/40 hover:scale-105 active:scale-95 transition-all shadow-md"
-            aria-label="Generar PDF"
-            title="Generar PDF del cuento"
-          >
-            <FileDown className="h-5 w-5" />
-          </button>
+          </button> */}
+          
+          {/* Botón mágico de descarga */}
+          <div className="relative">
+            {/* Estrellas orbitantes */}
+            <motion.div
+              animate={{
+                rotate: 360
+              }}
+              transition={{
+                duration: 15,
+                repeat: Infinity,
+                ease: "linear"
+              }}
+              className="absolute inset-0 pointer-events-none"
+            >
+              {/* Estrella superior */}
+              <motion.div
+                animate={{
+                  scale: [0.7, 1.2, 0.7],
+                  opacity: [0.5, 1, 0.5]
+                }}
+                transition={{
+                  duration: 2.5,
+                  repeat: Infinity,
+                  ease: "easeInOut"
+                }}
+                className="absolute -top-2 left-1/2 transform -translate-x-1/2"
+              >
+                <Star className="h-3 w-3 text-yellow-300 fill-yellow-300" />
+              </motion.div>
+              
+              {/* Estrella derecha */}
+              <motion.div
+                animate={{
+                  scale: [0.5, 1, 0.5],
+                  opacity: [0.4, 0.9, 0.4]
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: 0.8
+                }}
+                className="absolute top-1/2 -right-3 transform -translate-y-1/2"
+              >
+                <Star className="h-2.5 w-2.5 text-pink-300 fill-pink-300" />
+              </motion.div>
+              
+              {/* Estrella izquierda */}
+              <motion.div
+                animate={{
+                  scale: [0.6, 1.1, 0.6],
+                  opacity: [0.3, 0.8, 0.3]
+                }}
+                transition={{
+                  duration: 1.8,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: 1.2
+                }}
+                className="absolute top-1/2 -left-3 transform -translate-y-1/2"
+              >
+                <Star className="h-2.5 w-2.5 text-purple-300 fill-purple-300" />
+              </motion.div>
+            </motion.div>
+
+            {/* Partículas mágicas */}
+            {[...Array(4)].map((_, i) => (
+              <motion.div
+                key={i}
+                animate={{
+                  y: [-8, -20, -8],
+                  x: [0, (i % 2 === 0 ? 4 : -4), 0],
+                  opacity: [0, 1, 0],
+                  scale: [0, 1, 0]
+                }}
+                transition={{
+                  duration: 3 + i * 0.3,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: i * 0.5
+                }}
+                className="absolute w-1 h-1 bg-gradient-to-r from-yellow-200 to-white rounded-full blur-sm pointer-events-none"
+                style={{
+                  left: `${20 + i * 15}%`,
+                  top: `${30 + (i % 2) * 20}%`
+                }}
+              />
+            ))}
+
+            <motion.button
+              animate={{
+                boxShadow: [
+                  "0 4px 15px rgba(168, 85, 247, 0.3)",
+                  "0 6px 20px rgba(168, 85, 247, 0.5)",
+                  "0 4px 15px rgba(168, 85, 247, 0.3)"
+                ]
+              }}
+              transition={{
+                duration: 2,
+                repeat: Infinity,
+                ease: "easeInOut"
+              }}
+              whileHover={{ 
+                scale: 1.05,
+                boxShadow: "0 8px 25px rgba(168, 85, 247, 0.6)"
+              }}
+              whileTap={{ scale: 0.95 }}
+              onClick={handlePrint}
+              className="relative px-4 py-2.5 rounded-full bg-gradient-to-r from-purple-500/30 to-pink-500/30 backdrop-blur-md border border-white/30 flex items-center justify-center text-white hover:from-purple-500/50 hover:to-pink-500/50 transition-all duration-200 group font-semibold text-sm whitespace-nowrap overflow-hidden"
+              aria-label="Descargar cuento en PDF"
+              title="Descargar tu cuento en PDF"
+            >
+              {/* Brillo deslizante */}
+              <motion.div
+                animate={{
+                  x: [-100, 100],
+                  opacity: [0, 0.5, 0]
+                }}
+                transition={{
+                  duration: 3,
+                  repeat: Infinity,
+                  ease: "easeInOut"
+                }}
+                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent skew-x-12"
+              />
+              
+              {/* Overlay mágico */}
+              <motion.div
+                animate={{
+                  opacity: [0.2, 0.4, 0.2]
+                }}
+                transition={{
+                  duration: 2.5,
+                  repeat: Infinity,
+                  ease: "easeInOut"
+                }}
+                className="absolute inset-0 bg-gradient-to-r from-yellow-400/20 to-orange-400/20"
+              />
+
+              <div className="relative flex items-center">
+                {/* Icono con efectos mágicos */}
+                <div className="relative mr-2">
+                  <motion.div
+                    animate={{
+                      rotate: [0, 5, -5, 0],
+                      scale: [1, 1.1, 1]
+                    }}
+                    transition={{
+                      duration: 2.5,
+                      repeat: Infinity,
+                      ease: "easeInOut"
+                    }}
+                  >
+                    <FileDown className="h-4 w-4" />
+                  </motion.div>
+                  
+                  {/* Sparkles alrededor del icono */}
+                  <motion.div
+                    animate={{
+                      scale: [0, 1, 0],
+                      rotate: [0, 180]
+                    }}
+                    transition={{
+                      duration: 2,
+                      repeat: Infinity,
+                      ease: "easeInOut",
+                      delay: 0.2
+                    }}
+                    className="absolute -top-1 -right-1"
+                  >
+                    <Sparkles className="h-2 w-2 text-yellow-300" />
+                  </motion.div>
+                  
+                  <motion.div
+                    animate={{
+                      scale: [0, 1, 0],
+                      rotate: [0, -120]
+                    }}
+                    transition={{
+                      duration: 1.8,
+                      repeat: Infinity,
+                      ease: "easeInOut",
+                      delay: 1
+                    }}
+                    className="absolute -bottom-1 -left-1"
+                  >
+                    <Sparkles className="h-1.5 w-1.5 text-pink-300" />
+                  </motion.div>
+                  
+                  {/* Anillo pulsante */}
+                  <motion.div
+                    animate={{
+                      scale: [0, 1.5, 0],
+                      opacity: [0, 0.6, 0]
+                    }}
+                    transition={{
+                      duration: 2,
+                      repeat: Infinity,
+                      ease: "easeOut"
+                    }}
+                    className="absolute inset-0 bg-white/20 rounded-full"
+                  />
+                </div>
+                
+                <span className="hidden sm:inline relative">
+                  Descarga tu cuento
+                  {/* Pequeñas estrellas en el texto */}
+                  <motion.div
+                    animate={{
+                      opacity: [0, 1, 0],
+                      scale: [0.5, 1, 0.5]
+                    }}
+                    transition={{
+                      duration: 2,
+                      repeat: Infinity,
+                      ease: "easeInOut",
+                      delay: 0.5
+                    }}
+                    className="absolute -top-1 -right-2"
+                  >
+                    <Star className="h-1.5 w-1.5 text-yellow-200 fill-yellow-200" />
+                  </motion.div>
+                </span>
+                <span className="sm:hidden">Descargar</span>
+              </div>
+            </motion.button>
+          </div>
         </div>
 
         <div className="w-full max-w-2xl mx-auto pt-20 px-2 sm:px-6 flex-1 flex flex-col">
@@ -399,7 +649,9 @@ export default function StoryViewer() {
           title={currentChapter?.title || story?.title || "Tu cuento TaleMe!"}
           content={currentChapter?.content || ""}
           storyId={storyId!}
-          chapterId={currentChapter?.id || "1"}
+          chapterId={currentChapter?.id || storyId!}
+          paymentSuccess={paymentSuccess}
+          sessionId={sessionId}
         />
       </div> {/* Fin fondo */}
     </PageTransition>

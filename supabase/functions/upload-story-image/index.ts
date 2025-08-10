@@ -94,6 +94,7 @@ serve(async (req: Request) => {
     // Define storage path: images-stories/storyId/chapterId/imageType.jpeg
     const storagePath = `${storyId}/${chapterId}/${imageType}.jpeg`;
     console.log(`[UPLOAD_STORY_IMAGE] Uploading to path: ${storagePath}`);
+    console.log(`[UPLOAD_STORY_IMAGE_DEBUG] storyId: ${storyId}, chapterId: ${chapterId}, imageType: ${imageType}`);
 
     // Upload to Supabase Storage
     const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
