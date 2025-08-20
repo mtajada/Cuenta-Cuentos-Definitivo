@@ -404,66 +404,106 @@ export class StoryPdfService {
     
     let paragraphIndex = 0;
     let pageIndex = 0;
+    const maxPages = Math.max(50, estimatedTotalPages * 2); // Safety limit to prevent infinite loops
     
     // Process all paragraphs, creating pages as needed
-    while (paragraphIndex < paragraphs.length) {
+    while (paragraphIndex < paragraphs.length && pageIndex < maxPages) {
       pdf.addPage();
       
       // Determine which background image to use (first half scene_1, second half scene_2)
       const useScene1 = pageIndex < scene1Pages;
       const backgroundImage = useScene1 ? scene1ImageData : scene2ImageData;
       
-      console.log(`[StoryPdfService] Page ${pageIndex + 1}: Using ${useScene1 ? 'scene_1' : 'scene_2'}`);
+      console.log(`[StoryPdfService] Page ${pageIndex + 1}/${maxPages}: Using ${useScene1 ? 'scene_1' : 'scene_2'} (Paragraph ${paragraphIndex + 1}/${paragraphs.length})`);
       
-             // Add background image - clean, no overlays
-       try {
-         pdf.addImage(backgroundImage, 'JPEG', 0, 0, pageWidth, pageHeight);
-       } catch (error) {
-         console.error('[StoryPdfService] Error adding background image:', error);
-         // Fallback to white background
-         pdf.setFillColor(255, 255, 255);
-         pdf.rect(0, 0, pageWidth, pageHeight, 'F');
-       }
+      // Add background image - clean, no overlays
+      try {
+        pdf.addImage(backgroundImage, 'JPEG', 0, 0, pageWidth, pageHeight);
+      } catch (error) {
+        console.error('[StoryPdfService] Error adding background image:', error);
+        // Fallback to white background
+        pdf.setFillColor(255, 255, 255);
+        pdf.rect(0, 0, pageWidth, pageHeight, 'F');
+      }
       
       // Add header with logo and title
       await this.addHeaderToPage(pdf, title);
       
-             // Configure text style for children's book - clean black text over images
-       pdf.setFont('helvetica', 'bold');
-       pdf.setFontSize(22); // Large text for children's book readability over images
-       pdf.setTextColor('#000000'); // Pure black for maximum contrast
+      // Configure text style for children's book - clean black text over images
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(22); // Large text for children's book readability over images
+      pdf.setTextColor('#000000'); // Pure black for maximum contrast
        
-       // Add paragraphs to this page with varied positioning
-       let yPos = margin + 30; // Space for header
+      // Add paragraphs to this page with varied positioning
+      let yPos = margin + 30; // Space for header
+      let paragraphsAddedThisPage = 0;
        
-       // Process paragraphs until we run out of space or paragraphs
-       while (paragraphIndex < paragraphs.length) {
-         const paragraph = paragraphs[paragraphIndex];
-         
-         // Add some randomness to text positioning for children's book feel
-         const randomOffset = (Math.random() - 0.5) * 10; // ±5mm random offset
-         const adjustedMargin = Math.max(15, Math.min(25, margin + randomOffset));
-         const adjustedWidth = pageWidth - 2 * adjustedMargin;
-         
-         // Split text to fit width
-         const lines = pdf.splitTextToSize(paragraph, adjustedWidth);
-         
-         // Check if paragraph fits on current page (adjusted for larger text)
-         if (yPos + lines.length * 15 + 25 > pageHeight - margin) {
-           // Paragraph doesn't fit, leave it for next page
-           break;
-         }
-         
-         // Add paragraph text with white border for better visibility over images
-         this.drawTextWithWhiteBorder(pdf, lines, adjustedMargin, yPos);
-         
-         // Update position for next paragraph with more spacing for larger text
-         yPos += lines.length * 15 + 25; // Extra space between paragraphs for 22pt text
-         paragraphIndex++;
-       }
+      // Process paragraphs until we run out of space or paragraphs
+      while (paragraphIndex < paragraphs.length && paragraphsAddedThisPage < 10) { // Max 10 paragraphs per page
+        const paragraph = paragraphs[paragraphIndex];
+        
+        // Skip empty paragraphs
+        if (!paragraph || paragraph.trim() === '') {
+          paragraphIndex++;
+          continue;
+        }
+        
+        // Add some randomness to text positioning for children's book feel
+        const randomOffset = (Math.random() - 0.5) * 10; // ±5mm random offset
+        const adjustedMargin = Math.max(15, Math.min(25, margin + randomOffset));
+        const adjustedWidth = pageWidth - 2 * adjustedMargin;
+        
+        // Split text to fit width
+        const lines = pdf.splitTextToSize(paragraph, adjustedWidth);
+        
+        // Check if paragraph fits on current page (adjusted for larger text)
+        const requiredSpace = lines.length * 15 + 25;
+        const availableSpace = pageHeight - margin - yPos;
+        
+        if (requiredSpace > availableSpace) {
+          // Paragraph doesn't fit, leave it for next page
+          console.log(`[StoryPdfService] Paragraph ${paragraphIndex + 1} doesn't fit (needs ${requiredSpace}mm, available ${availableSpace}mm)`);
+          break;
+        }
+        
+        // Add paragraph text with white border for better visibility over images
+        this.drawTextWithWhiteBorder(pdf, lines, adjustedMargin, yPos);
+        
+        // Update position for next paragraph with more spacing for larger text
+        yPos += requiredSpace;
+        paragraphIndex++;
+        paragraphsAddedThisPage++;
+      }
+      
+      // If no paragraphs were added to this page, force add one to prevent infinite loop
+      if (paragraphsAddedThisPage === 0 && paragraphIndex < paragraphs.length) {
+        console.warn(`[StoryPdfService] Force adding paragraph ${paragraphIndex + 1} to prevent infinite loop`);
+        const paragraph = paragraphs[paragraphIndex];
+        const adjustedWidth = pageWidth - 2 * margin;
+        const lines = pdf.splitTextToSize(paragraph, adjustedWidth);
+        
+        // Take only what fits on the page
+        const maxLines = Math.floor((pageHeight - margin - yPos) / 15);
+        const fitLines = lines.slice(0, Math.max(1, maxLines));
+        
+        this.drawTextWithWhiteBorder(pdf, fitLines, margin, yPos);
+        
+        // Split the paragraph if needed
+        if (lines.length > fitLines.length) {
+          const remainingLines = lines.slice(fitLines.length);
+          paragraphs[paragraphIndex] = remainingLines.join(' ');
+        } else {
+          paragraphIndex++;
+        }
+      }
        
-       // Move to next page
-       pageIndex++;
+      // Move to next page
+      pageIndex++;
+    }
+
+    // Check if we hit the safety limit
+    if (pageIndex >= maxPages) {
+      console.warn(`[StoryPdfService] Hit maximum page limit (${maxPages}). Stopping generation to prevent infinite loop.`);
     }
   }
 
@@ -688,7 +728,33 @@ export class StoryPdfService {
         );
         
         if (!generationResult.success || !generationResult.imageUrls) {
-          throw new Error(`Failed to generate required images: ${generationResult.error}`);
+          console.warn('[StoryPdfService] ⚠️ Image generation failed, proceeding with fallback PDF');
+          
+          // Fallback: Generate enhanced standard PDF
+          onProgress?.({
+            currentStep: 'Generando PDF con fondo blanco...',
+            completedImages: 0,
+            totalImages: 3,
+            progress: 80
+          });
+          
+          const fallbackPdf = await this.generateStandardPdf({
+            title,
+            author,
+            content,
+            storyId,
+            chapterId
+          });
+          
+          onProgress?.({
+            currentStep: 'PDF fallback generado exitosamente',
+            completedImages: 0,
+            totalImages: 3,
+            progress: 100
+          });
+          
+          console.log('[StoryPdfService] ✅ Fallback PDF generated successfully');
+          return fallbackPdf;
         }
         
         imageUrls = generationResult.imageUrls;

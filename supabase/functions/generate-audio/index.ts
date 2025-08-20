@@ -4,7 +4,7 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts"; // O la versión que uses
 import { OpenAI } from "https://esm.sh/openai@4.40.0"; // O versión más reciente
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.8';
-import { corsHeaders } from '../_shared/cors.ts'; // Asume que está en la carpeta renombrada 'functions'
+import { corsHeaders, getCorsHeaders } from '../_shared/cors.ts'; // Asume que está en la carpeta renombrada 'functions'
 
 // --- Configuración ---
 console.log(`[GENERATE_AUDIO_DEBUG] Function generate-audio initializing...`);
@@ -30,13 +30,35 @@ const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 const PREMIUM_MONTHLY_ALLOWANCE = 10;
 
 console.log(`[GENERATE_AUDIO_DEBUG] Function generate-audio initialized successfully.`);
+
+/**
+ * Cleans text for speech generation (exact replica from ttsService.ts)
+ * @param text Raw text to clean  
+ * @returns Cleaned text optimized for TTS
+ */
+function cleanTextForSpeech(text: string): string {
+  return text
+    // Mantener caracteres especiales españoles
+    .replace(/[^\w\s.,!?áéíóúñÁÉÍÓÚÑ-]/g, '')
+    // Normalizar espacios
+    .replace(/\s+/g, ' ')
+    // Agregar pausas naturales
+    .replace(/([.!?])\s+/g, '$1\n')
+    .replace(/([.,])\s+/g, '$1 ')
+    // Eliminar líneas vacías múltiples
+    .replace(/\n\s*\n/g, '\n')
+    .trim();
+}
+
 // --- Fin Configuración ---
 
 serve(async (req: Request) => {
+  // Get dynamic CORS headers for this request
+  const dynamicCorsHeaders = getCorsHeaders(req);
+  
   // Manejo Preflight OPTIONS
   if (req.method === 'OPTIONS') {
-    console.log('[GENERATE_AUDIO_DEBUG] Handling OPTIONS preflight request');
-    return new Response('ok', { headers: corsHeaders });
+    return new Response('ok', { headers: dynamicCorsHeaders });
   }
 
   let userId: string | null = null; // Para logging en caso de error temprano
@@ -48,7 +70,7 @@ serve(async (req: Request) => {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
         console.warn('[GENERATE_AUDIO_WARN] Invalid or missing Authorization header.');
-        return new Response(JSON.stringify({ error: 'Token inválido.' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ error: 'Token inválido.' }), { status: 401, headers: { ...dynamicCorsHeaders, 'Content-Type': 'application/json' } });
     }
     const token = authHeader.replace('Bearer ', '');
 
@@ -58,13 +80,50 @@ serve(async (req: Request) => {
 
     if (authError || !user) {
         console.error('[GENERATE_AUDIO_ERROR] Authentication failed:', authError?.message || 'User not found for token.');
-        return new Response(JSON.stringify({ error: 'No autenticado.' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ error: 'No autenticado.' }), { status: 401, headers: { ...dynamicCorsHeaders, 'Content-Type': 'application/json' } });
     }
     userId = user.id; // Asignamos userId para logging posterior
     console.log(`[GENERATE_AUDIO_INFO] User Authenticated: ${userId}`);
     // --- Fin Autenticación ---
 
-    // --- 2. Obtener Perfil y Verificar Permiso/Límites/Créditos ---
+    // --- 2. Leer y Validar Request Body ---
+    let requestBody;
+    try {
+        // Verificar que la request tenga contenido
+        if (!req.body) {
+            console.error(`[GENERATE_AUDIO_ERROR] No body in request for user ${userId}`);
+            return new Response(JSON.stringify({ error: 'No se encontró cuerpo en la solicitud' }), { 
+                status: 400, 
+                headers: { ...dynamicCorsHeaders, 'Content-Type': 'application/json' } 
+            });
+        }
+
+        // Parsear el JSON
+        requestBody = await req.json();
+        
+    } catch (jsonError) {
+        console.error(`[GENERATE_AUDIO_ERROR] Failed to parse JSON for user ${userId}:`, jsonError);
+        
+        return new Response(JSON.stringify({ 
+            error: 'Error al procesar el formato de la solicitud',
+            details: jsonError.message 
+        }), { 
+            status: 400, 
+            headers: { ...dynamicCorsHeaders, 'Content-Type': 'application/json' } 
+        });
+    }
+
+    // Validar que el texto sea válido
+    const { text, voice = 'nova', model, instructions } = requestBody;
+    if (!text || typeof text !== 'string' || text.trim().length === 0) {
+        console.warn(`[GENERATE_AUDIO_WARN] Invalid request body for user ${userId}: Text is missing or empty.`);
+        return new Response(JSON.stringify({ error: 'El texto es requerido' }), { 
+            status: 400, 
+            headers: { ...dynamicCorsHeaders, 'Content-Type': 'application/json' } 
+        });
+    }
+
+    // --- 3. Obtener Perfil y Verificar Permiso/Límites/Créditos ---
     console.log(`[GENERATE_AUDIO_DEBUG] Fetching profile for user ${userId}...`);
     const { data: profile, error: profileError } = await supabaseAdmin
         .from('profiles')
@@ -148,22 +207,27 @@ serve(async (req: Request) => {
     // Si la actualización de la DB falló, no continuamos
     if (dbUpdateError) {
         console.error(`[GENERATE_AUDIO_ERROR] CRITICAL FAIL: Failed to update ${creditSource} count via RPC for user ${userId}:`, dbUpdateError);
-        return new Response(JSON.stringify({ error: 'Error al actualizar el saldo de créditos.' }), { status: 500, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: 'Error al actualizar el saldo de créditos.' }), { status: 500, headers: dynamicCorsHeaders });
     }
     console.log(`[GENERATE_AUDIO_INFO] Credit/Usage count updated successfully for user ${userId}. Proceeding with TTS generation.`);
+    
+    // --- 5. Procesar Solicitud y Generar Audio ---
+    console.log(`[GENERATE_AUDIO_INFO] Processing TTS generation for user ${userId}...`);
 
-    // --- 5. Procesar Solicitud y Generar Audio (AHORA SÍ) ---
-    const { text, voice = 'alloy', model = 'tts-1' } = await req.json(); // Proporcionar defaults
-    if (!text || typeof text !== 'string' || text.trim().length === 0) {
-        console.warn(`[GENERATE_AUDIO_WARN] Invalid request body for user ${userId}: Text is missing or empty.`);
-        return new Response(JSON.stringify({ error: 'Texto inválido o ausente requerido.' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
+    // Limpiar el texto antes de procesarlo
+    const cleanedText = cleanTextForSpeech(text);
 
-    console.log(`[GENERATE_AUDIO_INFO] Generating audio via OpenAI for user ${userId} (Voice: ${voice}, Model: ${model})...`);
+    // Combinar el system prompt con las instrucciones específicas del narrador
+    const SYSTEM_PROMPT = "Eres un narrador profesional de cuentos infantiles. Narra de forma expresiva, clara y envolvente, adaptando el tono y ritmo para captar la atención de los niños.";
+    const fullInstructions = instructions 
+        ? `${SYSTEM_PROMPT} ${instructions}`
+        : SYSTEM_PROMPT;
+    
     const response = await openai.audio.speech.create({
         model: model,
         voice: voice,
-        input: text.trim() // Usar texto sin espacios extra
+        input: cleanedText,
+        instructions: fullInstructions
     });
 
     // Verificar si la respuesta de OpenAI fue exitosa
@@ -171,35 +235,67 @@ serve(async (req: Request) => {
         const errorBody = await response.text(); // Intentar leer el cuerpo del error
         console.error(`[GENERATE_AUDIO_ERROR] OpenAI API error for user ${userId}: ${response.status} ${response.statusText}`, errorBody);
         // Devolver un error genérico al cliente, pero loguear el detalle
-        return new Response(JSON.stringify({ error: 'Error al contactar el servicio de generación de voz.' }), { status: 502, headers: corsHeaders }); // 502 Bad Gateway
+        return new Response(JSON.stringify({ error: 'Error al contactar el servicio de generación de voz.' }), { status: 502, headers: dynamicCorsHeaders }); // 502 Bad Gateway
     }
 
-    const audioBuffer = await response.arrayBuffer();
-    console.log(`[GENERATE_AUDIO_INFO] Audio generated successfully via OpenAI for user ${userId}.`);
-    // --- Fin Generar Audio ---
-
-    // --- 6. Devolver Respuesta de Audio ---
-    // Nota: Ya no actualizamos créditos aquí, se hizo antes.
-    console.log(`[GENERATE_AUDIO_INFO] Returning audio buffer to user ${userId}.`);
-    return new Response(audioBuffer, {
+    // Convertir la respuesta a un Blob usando arrayBuffer
+    const buffer = await response.arrayBuffer();
+    
+    console.log(`[GENERATE_AUDIO_INFO] Audio generated successfully for user ${userId}: ${buffer.byteLength} bytes`);
+    return new Response(buffer, {
         headers: {
-            ...corsHeaders,
-            'Content-Type': 'audio/mpeg' // O el tipo correcto devuelto por OpenAI
+            ...dynamicCorsHeaders,
+            'Content-Type': 'audio/mpeg'
         },
         status: 200
     });
     // --- Fin Devolver Respuesta ---
 
-  } catch (error) {
-    // Captura errores generales (JSON parse, errores inesperados, etc.)
-    console.error(`[GENERATE_AUDIO_ERROR] Unhandled error in generate-audio function for user ${userId || 'UNKNOWN'}:`, error);
-    let errorMessage = 'Error interno del servidor al generar el audio.';
-    // Evitar exponer detalles internos en producción
-    // if (error instanceof Error) errorMessage = error.message;
-    // Usar 500 Internal Server Error para errores no manejados específicamente
+  } catch (error: unknown) {
+    console.error('Error en generación de voz:', error);
+    
+    // Type guard para OpenAI errors (exacto como ttsService)
+    function isOpenAIError(error: unknown): error is { status?: number; code?: string | number; message?: string } {
+      return typeof error === 'object' && error !== null;
+    }
+    
+    const openAIError = isOpenAIError(error) ? error : null;
+    
+    // Manejar específicamente el error 429 (Too Many Requests) - exacto como ttsService
+    if (openAIError?.status === 429 || openAIError?.code === 429) {
+      return new Response(JSON.stringify({ error: 'Alcanzaste el máximo de créditos para generar un audio' }), {
+        status: 429,
+        headers: { ...dynamicCorsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    
+    if (openAIError?.status === 401 || openAIError?.code === 'invalid_api_key') {
+      return new Response(JSON.stringify({ error: 'Error de autenticación con el servicio de voz' }), {
+        status: 401,
+        headers: { ...dynamicCorsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    
+    if (openAIError?.status === 400) {
+      return new Response(JSON.stringify({ error: 'El texto proporcionado no es válido para generar audio' }), {
+        status: 400,
+        headers: { ...dynamicCorsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    
+    if (openAIError?.status && openAIError.status >= 500) {
+      return new Response(JSON.stringify({ error: 'El servicio de voz no está disponible temporalmente' }), {
+        status: 500,
+        headers: { ...dynamicCorsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    
+    const errorMessage = error instanceof Error ? error.message : 'Error inesperado al generar el audio';
+    console.error(`[GENERATE_AUDIO_ERROR] Final error for user ${userId || 'UNKNOWN'}:`, errorMessage);
+    
     return new Response(JSON.stringify({ error: errorMessage }), {
         status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        headers: { ...dynamicCorsHeaders, 'Content-Type': 'application/json' }
     });
   }
 });
