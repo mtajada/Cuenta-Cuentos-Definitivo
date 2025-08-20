@@ -98,38 +98,54 @@ export class ImageGenerationService {
   }
 
   /**
-   * Creates optimized prompts that reuse core visual elements for performance
+   * Creates optimized prompts that maintain story context while ensuring visual consistency
+   * Combines full story context with extracted elements for consistency
    */
   private static createOptimizedImagePrompts(title: string, content: string): Record<string, string> {
-    // Extract key elements from content for reuse
+    // Extract key elements for visual consistency
     const contentSummary = this.extractStoryElements(content);
     
-    // Base visual style that will be consistent across all images
-    const baseStyle = `Estilo acuarela tradicional infantil, colores suaves y cálidos, técnica de acuarela con bordes difuminados, paleta de colores pasteles, fondo luminoso, ambiente mágico y acogedor`;
-    
-    // Core character and setting description to maintain consistency
-    const coreElements = `${contentSummary.character} en ${contentSummary.setting}, ${contentSummary.mood}`;
+    // Enhanced base style with consistency instructions
+    const baseStyle = `Estilo acuarela tradicional infantil, colores suaves y cálidos, técnica de acuarela con bordes difuminados, paleta de colores pasteles, fondo luminoso, ambiente mágico y acogedor.
+
+IMPORTANTE: Mantener consistencia visual - ${contentSummary.character} debe aparecer con las mismas características físicas en todas las imágenes (mismos colores, rasgos, vestimenta básica). El ${contentSummary.setting} debe mantener la misma paleta de colores y estilo arquitectónico/natural.`;
+
+    // Base context with full story content but optimized structure
+    const storyContext = `**Contexto del Cuento:**
+Título: "${title}"
+Personaje Principal: ${contentSummary.character}
+Escenario: ${contentSummary.setting}
+Ambiente: ${contentSummary.mood}
+
+**Historia Completa:**
+${content}`;
 
     return {
       [IMAGES_TYPE.COVER]: `${SYSTEM_PROMPT_BASE}
 
-**PORTADA del cuento "${title}"**
-${coreElements}
-Composición de portada con título integrado artísticamente.
+${storyContext}
+
+**INSTRUCCIONES PARA PORTADA:**
+Genera una imagen de PORTADA que capture la esencia del cuento. Debe incluir el título "${title}" de manera artística y elementos visuales que representen la historia principal. El ${contentSummary.character} debe ser prominente y establecer el estilo visual que se mantendrá en las escenas.
+
 ${baseStyle}`,
 
       [IMAGES_TYPE.SCENE_1]: `${SYSTEM_PROMPT_BASE}
 
-**ESCENA PRINCIPAL 1:**
-${coreElements}
-Momento inicial o presentación del conflicto principal.
+${storyContext}
+
+**INSTRUCCIONES PARA PRIMERA ESCENA:**
+Genera una imagen de la PRIMERA ESCENA más importante del cuento, donde el ${contentSummary.character} debe ser el elemento central de la composición. Muestra un momento clave de la historia con el protagonista en acción, MANTENIENDO EXACTAMENTE las mismas características visuales establecidas (colores, rasgos físicos, vestimenta).
+
 ${baseStyle}`,
 
       [IMAGES_TYPE.SCENE_2]: `${SYSTEM_PROMPT_BASE}
 
-**ESCENA PRINCIPAL 2:**
-${coreElements}
-Momento de resolución o clímax emocional del cuento.
+${storyContext}
+
+**INSTRUCCIONES PARA SEGUNDA ESCENA:**
+Genera una imagen de la SEGUNDA ESCENA más importante del cuento, donde el ${contentSummary.character} debe ser prominente. Representa otro momento crucial diferente al anterior, mostrando al protagonista en una situación distinta pero MANTENIENDO PERFECTAMENTE las características visuales establecidas en las imágenes anteriores.
+
 ${baseStyle}`
     };
   }
