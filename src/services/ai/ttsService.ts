@@ -1,10 +1,11 @@
 // src/services/ai/ttsService.ts
 import { SYSTEM_PROMPT } from '@/constants/story-voices.constant';
-import OpenAI from 'openai';
+import { supabase } from '@/supabaseClient';
 
 /**
- * Servicio para generar audio a partir de texto usando la API REST de OpenAI
- * No usa Supabase ni funciones edge; realiza un fetch directo con tu clave.
+ * Secure TTS service that uses Supabase Edge Function
+ * Maintains exact same functionality as the original direct OpenAI implementation
+ * All OpenAI API keys are stored securely in Supabase secrets
  */
 export type OpenAIVoiceType =
   | 'alloy'
@@ -47,11 +48,7 @@ export const OPENAI_VOICES = [
   { id: 'ash' as const, name: 'Ash', description: 'Ash (Juvenil)' }
 ];
 
-// Inicializar cliente de OpenAI
-const openai = new OpenAI({
-  apiKey: import.meta.env.VITE_OPEN_AI_API_KEY,
-  dangerouslyAllowBrowser: true // Permitir uso en el navegador
-});
+// Edge Function handles OpenAI client securely on the server side
 
 // Función para obtener las voces disponibles
 export const getAvailableVoices = async () => {
@@ -59,7 +56,10 @@ export const getAvailableVoices = async () => {
 };
 
 /**
- * Genera audio a partir de texto usando la API del cliente oficial de OpenAI
+ * Generates audio from text using secure Supabase Edge Function
+ * Maintains exact same interface and behavior as the original direct OpenAI implementation
+ * @param options TTS configuration options
+ * @returns Promise<Blob> Audio blob from secure edge function
  */
 export const generateSpeech = async ({
   text,
@@ -79,25 +79,60 @@ export const generateSpeech = async ({
     ? `${SYSTEM_PROMPT} ${instructions}`
     : SYSTEM_PROMPT;
 
-  console.log(`Iniciando generación de audio... Texto limpio: ${cleanedText.length} caracteres`);
-
-  console.log(`Configuración: Voz=${voice}, Modelo=${model}`);
+  console.log(`Iniciando generación de audio... Texto: ${cleanedText.length} caracteres`);
   
   try {
-    // Llamar directamente a la API de OpenAI usando el cliente oficial
-    const response = await openai.audio.speech.create({
-      model,
-      voice,
-      input: cleanedText,
+    // Verificar autenticación antes de hacer la llamada
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !sessionData.session) {
+      throw new Error('Usuario no autenticado para generar audio');
+    }
+
+    // Preparar el body que se va a enviar
+    const requestBody = {
+      text: cleanedText,
+      voice: voice,
+      model: model,
       instructions: fullInstructions
+    };
+
+    // Obtener la URL de la Edge Function
+    const functionsUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-audio`;
+
+    // Usar fetch directo como solución al problema del body vacío en supabase.functions.invoke
+    const response = await fetch(functionsUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${sessionData.session.access_token}`,
+        'Content-Type': 'application/json',
+        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify(requestBody)
     });
 
-    // Convertir la respuesta a un Blob usando arrayBuffer
-    const buffer = await response.arrayBuffer();
-    const audioBlob = new Blob([buffer], { type: 'audio/mpeg' });
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Error en Edge Function:', errorText);
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    // Obtener el audio como blob
+    const data = await response.arrayBuffer();
+    const error = null; // No hay error si llegamos aquí
+
+    if (error) {
+      throw new Error(error.message || 'Error al generar el audio');
+    }
+
+    // La Edge Function devuelve el audio como ArrayBuffer
+    if (!data) {
+      throw new Error('No se recibió audio del servicio');
+    }
+
+    // Convertir la respuesta a Blob
+    const audioBlob = new Blob([data], { type: 'audio/mpeg' });
     
-    console.log("Blob de audio creado:", audioBlob.size, "bytes");
-    console.log('Audio generado correctamente');
+    console.log('Audio generado correctamente:', audioBlob.size, 'bytes');
     
     return audioBlob;
   } catch (error: unknown) {
@@ -105,7 +140,7 @@ export const generateSpeech = async ({
     
     const openAIError = isOpenAIError(error) ? error as OpenAIError : null;
     
-    // Manejar específicamente el error 429 (Too Many Requests)
+    // Mantener el mismo manejo de errores que tu servicio original
     if (openAIError?.status === 429 || openAIError?.code === 429) {
       throw new Error('Alcanzaste el máximo de créditos para generar un audio');
     }

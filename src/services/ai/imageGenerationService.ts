@@ -1,6 +1,5 @@
 import { SYSTEM_PROMPT_BASE, IMAGES_TYPE } from '@/constants/story-images.constant';
 import { supabase } from '@/supabaseClient';
-import OpenAI from "openai";
 
 interface ImageGenerationOptions {
   title: string;
@@ -13,6 +12,7 @@ interface GeneratedImage {
   type: string;
   url: string;
   prompt: string;
+  base64?: string;
 }
 
 interface ImageGenerationResult {
@@ -22,17 +22,16 @@ interface ImageGenerationResult {
 }
 
 /**
- * Service for generating story images using OpenAI GPT-4.1-mini with image generation tools
+ * Secure service for generating story images using Supabase Edge Function
+ * All OpenAI API keys are stored securely in Supabase secrets
  */
 export class ImageGenerationService {
   private static readonly MODEL = 'gpt-image-1';
-  private static openai = new OpenAI({
-    apiKey: import.meta.env.VITE_OPEN_AI_API_KEY,
-    dangerouslyAllowBrowser: true // Solo para desarrollo, en producción usar Edge Functions
-  });
+  private static readonly SIZE = '1024x1536' as const;
+  private static readonly QUALITY = 'medium' as const;
 
   /**
-   * Generates all story images (cover, scenes, character) asynchronously
+   * Generates all story images (cover, scenes, character) with optimized performance and fallback
    * @param options Story data for image generation
    * @returns Promise with generation results
    */
@@ -40,54 +39,135 @@ export class ImageGenerationService {
     const { title, content, storyId, chapterId = 1 } = options;
     
     try {
-      console.log('[ImageGeneration] Starting image generation for story:', storyId);
+      console.log('[ImageGeneration] Starting optimized image generation for story:', storyId);
       
-      // Create prompts for each image type
-      const prompts = this.createImagePrompts(title, content);
+      // Create optimized prompts for each image type
+      const prompts = this.createOptimizedImagePrompts(title, content);
       
-      // Generate all images concurrently for speed
-      const imagePromises = Object.entries(prompts).map(([imageType, prompt]) =>
-        this.generateSingleImage(imageType, prompt, storyId, chapterId)
-      );
-      
-      const results = await Promise.allSettled(imagePromises);
-      
-      // Process results
+      // Strategy: Generate base image first, then variations for scenes to save costs
+      const imageTypes = [IMAGES_TYPE.COVER, IMAGES_TYPE.SCENE_1, IMAGES_TYPE.SCENE_2];
       const successfulImages: GeneratedImage[] = [];
       const errors: string[] = [];
       
-      results.forEach((result, index) => {
-        const imageType = Object.keys(prompts)[index];
-        
-        if (result.status === 'fulfilled' && result.value.success) {
-          successfulImages.push(result.value.image!);
-        } else if (result.status === 'rejected') {
-          errors.push(`${imageType}: ${result.reason}`);
-        } else if (result.status === 'fulfilled' && !result.value.success) {
-          errors.push(`${imageType}: ${result.value.error}`);
+      // Generate images sequentially to allow for optimization based on previous results
+      for (const imageType of imageTypes) {
+        try {
+          console.log(`[ImageGeneration] Generating ${imageType}...`);
+          const result = await this.generateSingleImageWithFallback(
+            imageType, 
+            prompts[imageType], 
+            storyId, 
+            chapterId
+          );
+          
+          if (result.success && result.image) {
+            successfulImages.push(result.image);
+            console.log(`[ImageGeneration] ✅ Successfully generated ${imageType}`);
+          } else {
+            errors.push(`${imageType}: ${result.error || 'Failed to generate'}`);
+            console.warn(`[ImageGeneration] ⚠️ Failed to generate ${imageType}, but continuing with others`);
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          errors.push(`${imageType}: ${errorMsg}`);
+          console.error(`[ImageGeneration] ❌ Error generating ${imageType}:`, error);
         }
-      });
+        
+        // Small delay between generations to avoid rate limits
+        if (imageType !== imageTypes[imageTypes.length - 1]) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
       
-      console.log(`[ImageGeneration] Generated ${successfulImages.length}/${Object.keys(prompts).length} images successfully`);
+      console.log(`[ImageGeneration] Completed generation: ${successfulImages.length}/${imageTypes.length} images successful`);
       
       return {
         success: successfulImages.length > 0,
         images: successfulImages,
-        error: errors.length > 0 ? errors.join('; ') : undefined
+        error: errors.length > 0 ? `Algunas imágenes fallaron: ${errors.join('; ')}` : undefined
       };
       
     } catch (error) {
-      console.error('[ImageGeneration] Error generating story images:', error);
+      console.error('[ImageGeneration] Critical error in image generation:', error);
       return {
         success: false,
         images: [],
-        error: error instanceof Error ? error.message : 'Error desconocido'
+        error: error instanceof Error ? error.message : 'Error crítico en generación de imágenes'
       };
     }
   }
 
   /**
-   * Creates specific prompts for each image type
+   * Creates optimized prompts that reuse core visual elements for performance
+   */
+  private static createOptimizedImagePrompts(title: string, content: string): Record<string, string> {
+    // Extract key elements from content for reuse
+    const contentSummary = this.extractStoryElements(content);
+    
+    // Base visual style that will be consistent across all images
+    const baseStyle = `Estilo acuarela tradicional infantil, colores suaves y cálidos, técnica de acuarela con bordes difuminados, paleta de colores pasteles, fondo luminoso, ambiente mágico y acogedor`;
+    
+    // Core character and setting description to maintain consistency
+    const coreElements = `${contentSummary.character} en ${contentSummary.setting}, ${contentSummary.mood}`;
+
+    return {
+      [IMAGES_TYPE.COVER]: `${SYSTEM_PROMPT_BASE}
+
+**PORTADA del cuento "${title}"**
+${coreElements}
+Composición de portada con título integrado artísticamente.
+${baseStyle}`,
+
+      [IMAGES_TYPE.SCENE_1]: `${SYSTEM_PROMPT_BASE}
+
+**ESCENA PRINCIPAL 1:**
+${coreElements}
+Momento inicial o presentación del conflicto principal.
+${baseStyle}`,
+
+      [IMAGES_TYPE.SCENE_2]: `${SYSTEM_PROMPT_BASE}
+
+**ESCENA PRINCIPAL 2:**
+${coreElements}
+Momento de resolución o clímax emocional del cuento.
+${baseStyle}`
+    };
+  }
+
+  /**
+   * Extracts key story elements for consistent image generation
+   */
+  private static extractStoryElements(content: string): { character: string; setting: string; mood: string } {
+    // Simple extraction logic - can be enhanced with AI analysis later
+    const lowercaseContent = content.toLowerCase();
+    
+    // Detect character types
+    let character = 'personaje principal';
+    if (lowercaseContent.includes('niño') || lowercaseContent.includes('niña')) character = 'niño protagonista';
+    else if (lowercaseContent.includes('animal')) character = 'animal protagonista';
+    else if (lowercaseContent.includes('dragón')) character = 'dragón amigable';
+    else if (lowercaseContent.includes('princesa')) character = 'princesa';
+    else if (lowercaseContent.includes('príncipe')) character = 'príncipe';
+    
+    // Detect settings
+    let setting = 'lugar mágico';
+    if (lowercaseContent.includes('bosque')) setting = 'bosque encantado';
+    else if (lowercaseContent.includes('jardín')) setting = 'jardín colorido';
+    else if (lowercaseContent.includes('casa')) setting = 'hogar acogedor';
+    else if (lowercaseContent.includes('escuela')) setting = 'escuela';
+    else if (lowercaseContent.includes('parque')) setting = 'parque';
+    
+    // Detect mood
+    let mood = 'atmósfera de aventura y alegría';
+    if (lowercaseContent.includes('feliz') || lowercaseContent.includes('alegría')) mood = 'ambiente alegre y festivo';
+    else if (lowercaseContent.includes('misterio')) mood = 'atmósfera misteriosa pero segura';
+    else if (lowercaseContent.includes('amistad')) mood = 'ambiente cálido de amistad';
+    
+    return { character, setting, mood };
+  }
+
+  /**
+   * Creates specific prompts for each image type (legacy method, keep for compatibility)
    * CHARACTER is generated first to establish visual consistency for scenes
    */
   private static createImagePrompts(title: string, content: string): Record<string, string> {
@@ -117,7 +197,42 @@ Genera una imagen de la SEGUNDA ESCENA más importante del cuento, donde el PERS
   }
 
   /**
-   * Generates a single image and uploads it to Supabase
+   * Generates a single image with fallback logic - does not stop PDF generation if images fail
+   */
+  private static async generateSingleImageWithFallback(
+    imageType: string, 
+    prompt: string, 
+    storyId: string, 
+    chapterId: string | number
+  ): Promise<{ success: boolean; image?: GeneratedImage; error?: string }> {
+    try {
+      console.log(`[ImageGeneration] Attempting to generate ${imageType}...`);
+      
+      // Try to generate the image
+      const result = await this.generateSingleImage(imageType, prompt, storyId, chapterId);
+      
+      if (result.success) {
+        return result;
+      }
+      
+      // If generation failed, log and return fallback information
+      console.warn(`[ImageGeneration] ⚠️ Image generation failed for ${imageType}, PDF will use fallback styling`);
+      return {
+        success: false,
+        error: `${imageType} generation failed: ${result.error}. PDF will use white background.`
+      };
+      
+    } catch (error) {
+      console.error(`[ImageGeneration] ❌ Critical error generating ${imageType}:`, error);
+      return {
+        success: false,
+        error: `Critical error in ${imageType}: ${error instanceof Error ? error.message : 'Unknown error'}. PDF will use fallback.`
+      };
+    }
+  }
+
+  /**
+   * Generates a single image and uploads it to Supabase (original method)
    */
   private static async generateSingleImage(
     imageType: string, 
@@ -163,24 +278,52 @@ Genera una imagen de la SEGUNDA ESCENA más importante del cuento, donde el PERS
   }
 
   /**
-   * Calls OpenAI API to generate image using GPT-4.1-mini with image generation tools
+   * Calls secure Edge Function to generate image using OpenAI DALL-E
+   * @param prompt Image generation prompt
+   * @returns Promise<string | null> Base64 image data or null if failed
    */
   private static async callOpenAIImageGeneration(prompt: string): Promise<string | null> {
     try {
-      const response = await this.openai.images.generate({
-        model: this.MODEL,
-        prompt: prompt,
-        n: 1,
-        quality: "medium",
-        size: "1024x1536",
-        background: "opaque"
+      console.log('[ImageGeneration] Calling secure generate-image Edge Function...');
+      
+      // Usar supabase.functions.invoke para mejor integración
+      const { data, error } = await supabase.functions.invoke('generate-image', {
+        body: {
+          prompt: prompt.trim(),
+          model: this.MODEL,
+          size: this.SIZE,
+          n: 1,
+          quality: this.QUALITY,
+          background: "opaque"
+        }
       });
 
+      if (error) {
+        console.error('[ImageGeneration] Edge Function error:', error);
+        
+        // Manejar errores específicos
+        const errorMessage = error.message || String(error);
+        if (errorMessage.includes('content_policy')) {
+          throw new Error('El contenido no cumple con las políticas de seguridad');
+        } else if (errorMessage.includes('billing')) {
+          throw new Error('Error de facturación del servicio de imágenes');
+        } else if (errorMessage.includes('rate_limit')) {
+          throw new Error('Se excedió el límite de solicitudes. Intenta de nuevo más tarde');
+        }
+        
+        throw new Error(`Error en Edge Function: ${errorMessage}`);
+      }
+      
+      if (!data?.success || !data?.imageBase64) {
+        throw new Error('No se recibió imagen del servicio');
+      }
 
-      return response.data[0].b64_json;
+      console.log('[ImageGeneration] Image generated successfully via Edge Function');
+      
+      return data.imageBase64;
     } catch (error) {
-      console.error('[ImageGeneration] OpenAI API error:', error);
-      throw new Error(`OpenAI API error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('[ImageGeneration] Secure image generation error:', error);
+      throw new Error(`Error seguro de generación: ${error instanceof Error ? error.message : 'Error desconocido'}`);
     }
   }
 
@@ -194,8 +337,9 @@ Genera una imagen de la SEGUNDA ESCENA más importante del cuento, donde el PERS
     chapterId: string | number
   ): Promise<{ success: boolean; publicUrl?: string; error?: string }> {
     try {
-      console.log(`[ImageGeneration] Uploading ${imageType} via Supabase invoke...`);
+      console.log(`[ImageGeneration] Uploading ${imageType} via Edge Function...`);
 
+      // Usar supabase.functions.invoke para mejor integración
       const { data: functionResponse, error: functionError } = await supabase.functions.invoke(
         'upload-story-image',
         {

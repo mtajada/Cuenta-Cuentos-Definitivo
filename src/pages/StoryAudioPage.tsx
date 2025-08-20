@@ -521,6 +521,7 @@ export default function StoryAudioPage() {
       
       // Generar audio con OpenAI TTS
       const audioBlob = await generateSpeech({
+        // text: "Texto de prueba",
         text: content,
         voice: mappedVoice,
         model: 'gpt-4o-mini-tts',

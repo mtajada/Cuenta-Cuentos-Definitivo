@@ -233,10 +233,16 @@ export default function StoryPdfPreview({
         console.log('[StoryPdfPreview] ✅ All required images exist. Proceeding with illustrated PDF generation and download...');
         await handleDownloadIllustratedPdf();
       } else {
-        // Images missing, show confirmation dialog for payment
-        console.log('[StoryPdfPreview] ❌ Missing images detected:', validationResult.missingImages);
-        setNeedsImageGeneration(true);
-        setShowConfirmGeneration(true);
+        // PARA PRUEBAS: Comentamos la lógica de pago y generamos directamente
+        console.log('[StoryPdfPreview] ❌ Missing images detected. Generating directly for testing...');
+        console.log('[StoryPdfPreview] Missing images:', validationResult.missingImages);
+        
+        // Llamar directamente a la generación completa del PDF ilustrado
+        await handleDownloadIllustratedPdf();
+        
+        // TODO: Descomentar para producción
+        // setNeedsImageGeneration(true);
+        // setShowConfirmGeneration(true);
       }
       
     } catch (err) {
