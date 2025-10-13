@@ -48,7 +48,7 @@ export interface ContinuationContextType {
 export function createContinuationOptionsPrompt(
     story: Story,
     chapters: Chapter[],
-    language: string = 'es',
+    language: string = 'Español',
     childAge: number = 7,
     specialNeed: string | null = null,
 ): string {
@@ -126,7 +126,7 @@ export function createContinuationPrompt(
     story: Story,
     chapters: Chapter[],
     context: ContinuationContextType,
-    language: string = 'es',
+    language: string = 'Español',
     childAge: number = 7,
     specialNeed: string | null = null,
     storyDuration: string = 'medium'

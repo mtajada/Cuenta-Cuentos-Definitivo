@@ -25,10 +25,10 @@ function cleanExtractedText(text: string | undefined | null, type: 'title' | 'co
   cleaned = cleaned.replace(/^Contenido:\s*/i, '').trim();
   if (type === 'content') {
     cleaned = cleaned.replace(/^\s*\d+\.\s+/gm, ''); // Eliminar numeración de listas
-    cleaned = cleaned.replace(/^\s*[-\*]\s+/gm, ''); // Eliminar viñetas de listas
+    cleaned = cleaned.replace(/^\s*[-*]\s+/gm, ''); // Eliminar viñetas de listas
   }
   if (type === 'title') {
-    cleaned = cleaned.replace(/^["'“‘](.*)["'”’]$/s, '$1').trim(); // Quitar comillas alrededor del título
+    cleaned = cleaned.replace(/^["'"'](.*)["'"']$/s, '$1').trim(); // Quitar comillas alrededor del título
   }
   cleaned = cleaned.replace(/^(Respuesta|Aquí tienes el título|El título es):\s*/i, '').trim();
   cleaned = cleaned.replace(/^(Aquí tienes el cuento|El cuento es):\s*/i, '').trim();
@@ -37,16 +37,41 @@ function cleanExtractedText(text: string | undefined | null, type: 'title' | 'co
   return cleaned || defaultText; // Ensure non-empty string or default
 }
 
+// --- Interfaces for Request Parameters ---
+interface StoryCharacter {
+  name: string;
+  [key: string]: unknown;
+}
+
+interface StoryOptionsInput {
+  characters?: StoryCharacter[];
+  character?: StoryCharacter;
+  genre?: string;
+  moral?: string;
+  duration?: string;
+  language?: string;
+  [key: string]: unknown;
+}
+
+interface GenerateStoryRequestBody {
+  language?: string;
+  childAge?: number;
+  specialNeed?: string;
+  options?: StoryOptionsInput;
+  additionalDetails?: string;
+  [key: string]: unknown;
+}
+
 // --- Interface for Structured AI Response ---
 interface StoryGenerationResult {
   title: string;
   content: string;
 }
 
-function isValidStoryResult(data: any): data is StoryGenerationResult {
-  return data &&
-    typeof data.title === 'string' &&
-    typeof data.content === 'string';
+function isValidStoryResult(data: unknown): data is StoryGenerationResult {
+  return !!data &&
+    typeof (data as Record<string, unknown>).title === 'string' &&
+    typeof (data as Record<string, unknown>).content === 'string';
 }
 
 // --- Main Handler ---
@@ -135,7 +160,7 @@ serve(async (req: Request) => {
       console.warn(`Perfil no encontrado para ${userId}. Tratando como gratuito.`);
     }
 
-    let currentStoriesGenerated = profile?.monthly_stories_generated ?? 0;
+    const currentStoriesGenerated = profile?.monthly_stories_generated ?? 0;
     const FREE_STORY_LIMIT = 10;
 
     if (!isPremiumUser) {
@@ -154,7 +179,7 @@ serve(async (req: Request) => {
     }
 
     // 5. Body y Validación
-    let params: any;
+    let params: GenerateStoryRequestBody;
     try {
       params = await req.json();
       console.log(`[${functionVersion}] Params Recibidos:`, JSON.stringify(params, null, 2));
@@ -244,13 +269,15 @@ serve(async (req: Request) => {
       }
 
       // Normalize to characters array for internal processing
-      let charactersArray;
-      if (hasMultipleCharacters) {
+      let charactersArray: StoryCharacter[];
+      if (hasMultipleCharacters && params.options?.characters) {
         charactersArray = params.options.characters;
         console.log(`[${functionVersion}] Multiple characters mode: ${charactersArray.length} characters`);
-      } else {
+      } else if (params.options?.character) {
         charactersArray = [params.options.character];
         console.log(`[${functionVersion}] Single character mode (legacy): ${params.options.character.name}`);
+      } else {
+        throw new Error("No se pudo normalizar el array de personajes.");
       }
 
       // Validate characters array (1-4 characters)
@@ -258,8 +285,8 @@ serve(async (req: Request) => {
         throw new Error("Máximo 4 personajes permitidos por historia.");
       }
       
-      const invalidCharacters = charactersArray.filter(char => 
-        !char || typeof char !== 'object' || !char.name || typeof char.name !== 'string'
+      const invalidCharacters = charactersArray.filter((char) => 
+        !char || !char.name || typeof char.name !== 'string'
       );
       
       if (invalidCharacters.length > 0) {
@@ -267,10 +294,12 @@ serve(async (req: Request) => {
         throw new Error("Todos los personajes deben tener un nombre válido.");
       }
       
-      console.log(`[${functionVersion}] Characters validated: ${charactersArray.map(c => c.name).join(', ')}`);
+      console.log(`[${functionVersion}] Characters validated: ${charactersArray.map((c) => c.name).join(', ')}`);
       
       // Store normalized characters array for use in prompts
-      params.options.characters = charactersArray;
+      if (params.options) {
+        params.options.characters = charactersArray;
+      }
     
     } catch (error) {
       console.error(`[${functionVersion}] Failed to parse/validate JSON body for user ${userId}. Error:`, error);
@@ -279,9 +308,10 @@ serve(async (req: Request) => {
     }
 
     // 6. Generación IA con OpenAI Client y Esperando JSON
-    const systemPrompt = createSystemPrompt(params.language, params.childAge, params.specialNeed);
+    const systemPrompt = createSystemPrompt(params.language || 'Español', params.childAge, params.specialNeed);
     const userPrompt = createUserPrompt_JsonFormat({ // Esta función ahora genera un prompt pidiendo JSON
-      options: params.options,
+      // Type assertion: we've validated the structure above
+      options: params.options as unknown as {characters: {name: string}[]; genre: string; moral: string; duration?: string},
       additionalDetails: params.additionalDetails
     });
     const combinedPrompt = `${systemPrompt}\n\n${userPrompt}`;
@@ -325,48 +355,108 @@ serve(async (req: Request) => {
         } else {
           console.warn(`[${functionVersion}] AI response JSON structure is invalid. Received: ${aiResponseContent.substring(0, 500)}...`);
         }
-              } catch (parseError) {
-          console.error(`[${functionVersion}] Failed to parse JSON from AI response. Error: ${(parseError as Error).message}. Trying fallback parsing...`);
+      } catch (parseError) {
+        const errorMsg = parseError instanceof Error ? parseError.message : 'Unknown error';
+        console.error(`[${functionVersion}] Failed to parse JSON from AI response (User: ${userId}). Error: ${errorMsg}. Trying fallback parsing...`);
+        console.log(`[${functionVersion}] Problematic JSON (User: ${userId}, first 500 chars): ${aiResponseContent.substring(0, 500)}`);
+        
+        // Fallback 1: More aggressive cleaning of control characters
+        try {
+          console.log(`[${functionVersion}] Attempting aggressive control character cleaning (User: ${userId})...`);
           
-          // Fallback: Fix control characters and try again
-          try {
-            // Clean control characters that cause JSON parsing issues
-            let cleanedContent = aiResponseContent
-              .replace(/[\x00-\x1F\x7F]/g, (match: string) => {
-                // Keep newlines and tabs, escape others
-                if (match === '\n') return '\\n';
-                if (match === '\t') return '\\t';
-                if (match === '\r') return '\\r';
-                return ''; // Remove other control characters
-              });
-            
-            console.log(`[${functionVersion}] Cleaned content (first 300 chars): ${cleanedContent.substring(0, 300)}...`);
-            
-            const storyResult: StoryGenerationResult = JSON.parse(cleanedContent);
-            if (isValidStoryResult(storyResult)) {
-              finalTitle = cleanExtractedText(storyResult.title, 'title');
-              finalContent = cleanExtractedText(storyResult.content, 'content');
-              parsedSuccessfully = true;
-              console.log(`[${functionVersion}] Parsed AI JSON successfully with fallback. Title: "${finalTitle}"`);
+          // Strategy: Fix control characters that are problematic in JSON strings
+          // We need to be inside string values to escape them properly
+          let cleanedContent = aiResponseContent;
+          
+          // First, handle common cases of unescaped newlines and tabs within JSON string values
+          // Look for patterns like: "key": "value with\nnewline"
+          cleanedContent = cleanedContent.replace(
+            /"(title|content)"\s*:\s*"((?:[^"\\]|\\.)*)"/gs,
+            (_match, key, value) => {
+              // Fix unescaped control characters within the string value
+              const fixedValue = value
+                .replace(/\r\n/g, '\\n')  // Windows line endings
+                .replace(/\n/g, '\\n')     // Unix line endings
+                .replace(/\r/g, '\\r')     // Mac line endings
+                .replace(/\t/g, '\\t')     // Tabs
+                // eslint-disable-next-line no-control-regex
+                .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, ''); // Remove other control chars
+              return `"${key}": "${fixedValue}"`;
             }
-          } catch (fallbackError) {
-            console.error(`[${functionVersion}] Fallback JSON parsing also failed: ${(fallbackError as Error).message}`);
-            
-            // Last resort: Use regex to extract title and content
-            try {
-              const titleMatch = aiResponseContent.match(/"title"\s*:\s*"([^"]+)"/);
-              const contentMatch = aiResponseContent.match(/"content"\s*:\s*"([^"]+(?:\\.[^"]*)*)/);
-              
-              if (titleMatch && contentMatch) {
-                finalTitle = cleanExtractedText(titleMatch[1], 'title');
-                finalContent = cleanExtractedText(contentMatch[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t'), 'content');
-                parsedSuccessfully = true;
-                console.log(`[${functionVersion}] Extracted content using regex. Title: "${finalTitle}"`);
-              }
-            } catch (regexError) {
-              console.error(`[${functionVersion}] Regex extraction also failed: ${(regexError as Error).message}`);
-            }
+          );
+          
+          console.log(`[${functionVersion}] Cleaned content (first 400 chars): ${cleanedContent.substring(0, 400)}...`);
+          
+          const storyResult: StoryGenerationResult = JSON.parse(cleanedContent);
+          if (isValidStoryResult(storyResult)) {
+            finalTitle = cleanExtractedText(storyResult.title, 'title');
+            finalContent = cleanExtractedText(storyResult.content, 'content');
+            parsedSuccessfully = true;
+            console.log(`[${functionVersion}] Parsed AI JSON successfully with aggressive cleaning. Title: "${finalTitle}"`);
           }
+        } catch (fallbackError) {
+          const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : 'Unknown error';
+          console.error(`[${functionVersion}] Aggressive cleaning parsing also failed (User: ${userId}): ${fallbackMsg}`);
+          
+          // Fallback 2: Manual extraction using more robust regex
+          try {
+            console.log(`[${functionVersion}] Attempting manual extraction with regex (User: ${userId})...`);
+            
+            // Extract title - handle escaped quotes and newlines
+            const titleMatch = aiResponseContent.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)"/s);
+            
+            // Extract content - much more permissive, handle multiline
+            const contentMatch = aiResponseContent.match(/"content"\s*:\s*"((?:[^"\\]|\\.)*?)"\s*[,}]/s);
+            
+            if (titleMatch && contentMatch) {
+              // Decode escaped sequences
+              const rawTitle = titleMatch[1];
+              const rawContent = contentMatch[1];
+              
+              // Fix common escape sequences
+              finalTitle = cleanExtractedText(
+                rawTitle
+                  .replace(/\\n/g, '\n')
+                  .replace(/\\r/g, '\r')
+                  .replace(/\\t/g, '\t')
+                  .replace(/\\"/g, '"')
+                  .replace(/\\\\/g, '\\'),
+                'title'
+              );
+              
+              finalContent = cleanExtractedText(
+                rawContent
+                  .replace(/\\n/g, '\n')
+                  .replace(/\\r/g, '\r')
+                  .replace(/\\t/g, '\t')
+                  .replace(/\\"/g, '"')
+                  .replace(/\\\\/g, '\\'),
+                'content'
+              );
+              
+              parsedSuccessfully = true;
+              console.log(`[${functionVersion}] Extracted content using robust regex. Title: "${finalTitle.substring(0, 50)}..."`);
+            } else {
+              console.warn(`[${functionVersion}] Regex extraction failed (User: ${userId}). TitleMatch: ${!!titleMatch}, ContentMatch: ${!!contentMatch}`);
+              
+              // Log the problematic area
+              if (!titleMatch) {
+                console.log(`[${functionVersion}] Could not find title in response (User: ${userId})`);
+              }
+              if (!contentMatch) {
+                console.log(`[${functionVersion}] Could not find content in response (User: ${userId})`);
+                // Try to show what we got around position 774 (from error message)
+                const problemArea = aiResponseContent.substring(Math.max(0, 700), Math.min(aiResponseContent.length, 850));
+                console.log(`[${functionVersion}] Area around error position (User: ${userId}): "${problemArea}"`);
+              }
+              console.error(`[${functionVersion}] Complete raw response that failed all parsing (User: ${userId}): ${aiResponseContent}`);
+            }
+          } catch (regexError) {
+            const regexMsg = regexError instanceof Error ? regexError.message : 'Unknown error';
+            console.error(`[${functionVersion}] Regex extraction also failed (User: ${userId}): ${regexMsg}`);
+            console.error(`[${functionVersion}] Complete raw response (User: ${userId}): ${aiResponseContent}`);
+          }
+        }
       }
     } else {
       console.error(`[${functionVersion}] AI response was empty or text could not be extracted. Finish Reason: ${finishReason}`);

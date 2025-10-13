@@ -64,9 +64,10 @@ function isValidContinuationResponse(data: any): data is AiContinuationResponse 
 async function generateContinuationOptions(
   story: Story,
   chapters: Chapter[],
-  language: string = 'es',
+  language: string = 'Español',
   childAge: number = 7,
   specialNeed: string | null = null,
+  userId?: string,
 ): Promise<AiContinuationOptionsResponse> {
   console.log(`[${functionVersion}] generateContinuationOptions for story ${story?.id}`);
 
@@ -106,23 +107,45 @@ async function generateContinuationOptions(
     let parsedResponse;
     try {
       parsedResponse = JSON.parse(aiResponseContent);
+      console.log(`[${functionVersion}] Options JSON parsed successfully on first try`);
     } catch (parseError) {
-      console.error(`[${functionVersion}] Failed to parse options JSON. Trying fallback parsing...`);
+      const errorMsg = parseError instanceof Error ? parseError.message : 'Unknown error';
+      console.error(`[${functionVersion}] Failed to parse options JSON${userId ? ` (User: ${userId})` : ''}. Error: ${errorMsg}. Trying aggressive cleaning...`);
+      console.log(`[${functionVersion}] Problematic JSON (first 500 chars): ${aiResponseContent.substring(0, 500)}`);
       
-      // Fallback: Fix control characters and try again
-      const cleanedContent = aiResponseContent
-        .replace(/[\x00-\x1F\x7F]/g, (match: string) => {
-          if (match === '\n') return '\\n';
-          if (match === '\t') return '\\t';
-          if (match === '\r') return '\\r';
-          return '';
-        });
-      
+      // Fallback 1: More aggressive cleaning of control characters within JSON string values
       try {
+        let cleanedContent = aiResponseContent;
+        
+        // Fix unescaped control characters within JSON string values
+        cleanedContent = cleanedContent.replace(
+          /"(summary|title|content)"\s*:\s*"((?:[^"\\]|\\.)*)"/gs,
+          (_match, key, value) => {
+            // Fix unescaped control characters
+            let fixedValue = value
+              .replace(/\r\n/g, '\\n')  // Windows line endings
+              .replace(/\n/g, '\\n')     // Unix line endings
+              .replace(/\r/g, '\\r')     // Mac line endings
+              .replace(/\t/g, '\\t');    // Tabs
+            
+            // Remove other control characters
+            fixedValue = fixedValue.split('').filter(char => {
+              const code = char.charCodeAt(0);
+              return code >= 32 || code === 9 || code === 10 || code === 13;
+            }).join('');
+            
+            return `"${key}": "${fixedValue}"`;
+          }
+        );
+        
+        console.log(`[${functionVersion}] Cleaned JSON (first 400 chars): ${cleanedContent.substring(0, 400)}`);
         parsedResponse = JSON.parse(cleanedContent);
+        console.log(`[${functionVersion}] Options JSON parsed successfully with aggressive cleaning`);
       } catch (fallbackError) {
-        console.error(`[${functionVersion}] Both normal and fallback JSON parsing failed for options.`);
-        throw new Error("No se pudo parsear la respuesta JSON de opciones de la IA.");
+        const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : 'Unknown error';
+        console.error(`[${functionVersion}] Aggressive cleaning parsing also failed${userId ? ` (User: ${userId})` : ''}: ${fallbackMsg}`);
+        console.error(`[${functionVersion}] Raw response that failed${userId ? ` (User: ${userId})` : ''}: ${aiResponseContent}`);
+        throw new Error(`No se pudo parsear la respuesta JSON de opciones: ${errorMsg}`);
       }
     }
 
@@ -257,7 +280,7 @@ serve(async (req: Request) => {
       throw new Error("'userDirection' (string no vacío) requerido para 'directedContinuation'.");
     }
 
-    const language = body.language || story?.options?.language || 'es';
+    const language = body.language || story?.options?.language || 'Español';
     const childAge = body.childAge || story?.options?.childAge || 7;
     const specialNeed = body.specialNeed || story?.options?.specialNeed || 'Ninguna';
     const storyDuration = body.storyDuration || story?.options?.duration || 'medium';
@@ -288,7 +311,7 @@ serve(async (req: Request) => {
     console.log(`[${functionVersion}] Executing action: ${action} for user ${userId}, story ${story_id || 'N/A'}`);
 
     if (action === 'generateOptions') {
-      const optionsResponse = await generateContinuationOptions(story as Story, chapters as Chapter[], language, childAge, specialNeed);
+      const optionsResponse = await generateContinuationOptions(story as Story, chapters as Chapter[], language, childAge, specialNeed, userId || undefined);
       responsePayload = optionsResponse; // This is already { options: [...] }
     } else if (isContinuationAction) {
       const continuationContext: ContinuationContextType = {};
@@ -343,50 +366,96 @@ serve(async (req: Request) => {
           finalTitle = cleanExtractedText(parsedResponse.title, 'title');
           finalContent = cleanExtractedText(parsedResponse.content, 'content');
           parsedSuccessfully = true;
-          console.log(`[${functionVersion}] Parsed AI continuation JSON successfully.`);
+          console.log(`[${functionVersion}] Parsed AI continuation JSON successfully on first try.`);
         } else {
           console.warn(`[${functionVersion}] AI continuation response JSON structure invalid. Data:`, parsedResponse);
         }
-      } catch (parseError: any) {
-        console.error(`[${functionVersion}] Failed to parse JSON from AI continuation response. Error: ${parseError.message}. Trying fallback parsing...`);
+      } catch (parseError) {
+        const errorMsg = parseError instanceof Error ? parseError.message : 'Unknown error';
+        console.error(`[${functionVersion}] Failed to parse JSON from AI continuation response${userId ? ` (User: ${userId})` : ''}. Error: ${errorMsg}. Trying aggressive cleaning...`);
+        console.log(`[${functionVersion}] Problematic continuation JSON (first 500 chars): ${aiResponseContent.substring(0, 500)}`);
         
-        // Fallback: Fix control characters and try again
+        // Fallback 1: More aggressive cleaning of control characters within JSON string values
         try {
-          // Clean control characters that cause JSON parsing issues
-          const cleanedContent = aiResponseContent
-            .replace(/[\x00-\x1F\x7F]/g, (match: string) => {
-              // Keep newlines and tabs, escape others
-              if (match === '\n') return '\\n';
-              if (match === '\t') return '\\t';
-              if (match === '\r') return '\\r';
-              return ''; // Remove other control characters
-            });
+          let cleanedContent = aiResponseContent;
           
-          console.log(`[${functionVersion}] Cleaned continuation content (first 300 chars): ${cleanedContent.substring(0, 300)}...`);
+          // Fix unescaped control characters within JSON string values
+          cleanedContent = cleanedContent.replace(
+            /"(title|content)"\s*:\s*"((?:[^"\\]|\\.)*)"/gs,
+            (_match, key, value) => {
+              // Fix unescaped control characters
+              let fixedValue = value
+                .replace(/\r\n/g, '\\n')  // Windows line endings
+                .replace(/\n/g, '\\n')     // Unix line endings
+                .replace(/\r/g, '\\r')     // Mac line endings
+                .replace(/\t/g, '\\t');    // Tabs
+              
+              // Remove other control characters
+              fixedValue = fixedValue.split('').filter(char => {
+                const code = char.charCodeAt(0);
+                return code >= 32 || code === 9 || code === 10 || code === 13;
+              }).join('');
+              
+              return `"${key}": "${fixedValue}"`;
+            }
+          );
+          
+          console.log(`[${functionVersion}] Cleaned continuation JSON (first 400 chars): ${cleanedContent.substring(0, 400)}`);
           
           const parsedResponse = JSON.parse(cleanedContent);
           if (isValidContinuationResponse(parsedResponse)) {
             finalTitle = cleanExtractedText(parsedResponse.title, 'title');
             finalContent = cleanExtractedText(parsedResponse.content, 'content');
             parsedSuccessfully = true;
-            console.log(`[${functionVersion}] Parsed AI continuation JSON successfully with fallback.`);
+            console.log(`[${functionVersion}] Parsed AI continuation JSON successfully with aggressive cleaning.`);
           }
         } catch (fallbackError) {
-          console.error(`[${functionVersion}] Fallback JSON parsing also failed: ${(fallbackError as Error).message}`);
+          const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : 'Unknown error';
+          console.error(`[${functionVersion}] Aggressive cleaning parsing also failed${userId ? ` (User: ${userId})` : ''}: ${fallbackMsg}`);
           
-          // Last resort: Use regex to extract title and content
+          // Fallback 2: Manual extraction using more robust regex
           try {
-            const titleMatch = aiResponseContent.match(/"title"\s*:\s*"([^"]+)"/);
-            const contentMatch = aiResponseContent.match(/"content"\s*:\s*"([^"]+(?:\\.[^"]*)*)/);
+            console.log(`[${functionVersion}] Attempting manual extraction with regex${userId ? ` (User: ${userId})` : ''}...`);
+            
+            // Extract title and content with better regex
+            const titleMatch = aiResponseContent.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)"/s);
+            const contentMatch = aiResponseContent.match(/"content"\s*:\s*"((?:[^"\\]|\\.)*?)"\s*[,}]/s);
             
             if (titleMatch && contentMatch) {
-              finalTitle = cleanExtractedText(titleMatch[1], 'title');
-              finalContent = cleanExtractedText(contentMatch[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t'), 'content');
+              const rawTitle = titleMatch[1];
+              const rawContent = contentMatch[1];
+              
+              // Decode escaped sequences
+              finalTitle = cleanExtractedText(
+                rawTitle
+                  .replace(/\\n/g, '\n')
+                  .replace(/\\r/g, '\r')
+                  .replace(/\\t/g, '\t')
+                  .replace(/\\"/g, '"')
+                  .replace(/\\\\/g, '\\'),
+                'title'
+              );
+              
+              finalContent = cleanExtractedText(
+                rawContent
+                  .replace(/\\n/g, '\n')
+                  .replace(/\\r/g, '\r')
+                  .replace(/\\t/g, '\t')
+                  .replace(/\\"/g, '"')
+                  .replace(/\\\\/g, '\\'),
+                'content'
+              );
+              
               parsedSuccessfully = true;
-              console.log(`[${functionVersion}] Extracted continuation content using regex.`);
+              console.log(`[${functionVersion}] Extracted continuation content using robust regex. Title: "${finalTitle.substring(0, 50)}..."`);
+            } else {
+              console.warn(`[${functionVersion}] Regex extraction failed${userId ? ` (User: ${userId})` : ''}. TitleMatch: ${!!titleMatch}, ContentMatch: ${!!contentMatch}`);
+              console.error(`[${functionVersion}] Raw response that failed all parsing attempts${userId ? ` (User: ${userId})` : ''}: ${aiResponseContent}`);
             }
           } catch (regexError) {
-            console.error(`[${functionVersion}] Regex extraction also failed: ${(regexError as Error).message}`);
+            const regexMsg = regexError instanceof Error ? regexError.message : 'Unknown error';
+            console.error(`[${functionVersion}] Regex extraction also failed${userId ? ` (User: ${userId})` : ''}: ${regexMsg}`);
+            console.error(`[${functionVersion}] Complete raw response${userId ? ` (User: ${userId})` : ''}: ${aiResponseContent}`);
           }
         }
       }

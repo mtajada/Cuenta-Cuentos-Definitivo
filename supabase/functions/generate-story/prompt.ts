@@ -90,7 +90,7 @@ interface CreateUserPromptParams {
 export function createUserPrompt_JsonFormat({ options, additionalDetails }: CreateUserPromptParams): string {
     console.log(`[Helper v7.0] createUserPrompt_JsonFormat: options=`, options, `details=`, additionalDetails); // Log version actualizada
     const storyDuration = options.duration || 'medium';
-    const language = options.language || 'es';
+    const language = options.language || 'Español';
 
     // Unified character system - always use characters array (1-4 characters)
     const characters = options.characters || [];
@@ -154,14 +154,19 @@ export function createUserPrompt_JsonFormat({ options, additionalDetails }: Crea
 
     // Response format instructions (MODIFICADO PARA JSON)
     request += `\n**Instrucciones de formato de respuesta (¡MUY IMPORTANTE!):**\n`;
-    request += `* Debes responder con un ÚNICO objeto JSON.\n`;
+    request += `* Debes responder con un ÚNICO objeto JSON válido.\n`;
     request += `* El objeto JSON debe tener exactamente dos claves (keys): "title" y "content".\n`;
     request += `* El valor de la clave "title" debe ser una cadena de texto (string) que contenga ÚNICAMENTE el título generado (idealmente entre 4 y 7 palabras), respetando las indicaciones del punto 5 sobre el título (idioma ${language}, "Sentence case").\n`;
     request += `* El valor de la clave "content" debe ser una cadena de texto (string) con TODO el contenido del cuento, comenzando directamente con la primera frase de la historia.\n`;
-    request += `* Ejemplo del formato JSON esperado: {"title": "Un título extraordinario aquí", "content": "Había una vez en un lugar muy lejano..."}\n`;
+    request += `* **IMPORTANTE - Caracteres especiales en JSON**: Dentro de los valores de "title" y "content", debes escapar correctamente:\n`;
+    request += `  - Saltos de línea como \\n (barra invertida + n)\n`;
+    request += `  - Comillas dobles como \\" (barra invertida + comilla)\n`;
+    request += `  - Barras invertidas como \\\\ (doble barra invertida)\n`;
+    request += `  - Tabulaciones como \\t (barra invertida + t)\n`;
+    request += `* Ejemplo del formato JSON esperado: {"title": "Un título extraordinario aquí", "content": "Había una vez en un lugar muy lejano...\\n\\nEn ese lugar mágico..."}\n`;
     request += `* NO incluyas NADA antes del carácter '{' que inicia el objeto JSON.\n`;
     request += `* NO incluyas NADA después del carácter '}' que finaliza el objeto JSON.\n`;
-    request += `* Asegúrate de que el JSON sea válido y completo.\n`;
+    request += `* Asegúrate de que el JSON sea válido y pueda ser parseado por JSON.parse().\n`;
     request += `* NO uses markdown ni ningún otro formato DENTRO de los strings del JSON a menos que sea parte natural del texto del cuento.\n`;
 
     return request;

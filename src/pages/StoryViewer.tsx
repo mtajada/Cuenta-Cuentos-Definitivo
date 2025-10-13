@@ -564,7 +564,7 @@ export default function StoryViewer() {
 
           {/* Selectores y Pregunta de Desafío (sin cambios) */}
           {showChallengeSelector && <ChallengeSelector onSelectCategory={handleSelectCategory} onContinue={handleContinueAfterCategory} />}
-          {showLanguageSelector && <LanguageSelector currentLanguage={profileSettings?.language || 'es'} onSelectLanguage={handleSelectLanguage} onContinue={handleContinueAfterLanguage} onBack={handleBackToCategories} />}
+          {showLanguageSelector && <LanguageSelector currentLanguage={profileSettings?.language || 'Español'} onSelectLanguage={handleSelectLanguage} onContinue={handleContinueAfterLanguage} onBack={handleBackToCategories} />}
           {challengeQuestion && <ChallengeQuestion question={challengeQuestion} onNextQuestion={handleNextQuestion} onTryAgain={handleTryAgain} onChangeChallenge={handleChangeChallenge} />}
 
           {/* --- Barra de Acciones Inferior --- */}

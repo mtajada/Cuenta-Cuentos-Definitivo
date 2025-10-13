@@ -26,16 +26,14 @@ export const generateStory = async (options: Partial<StoryOptions>): Promise<Sto
     const selectedCharacters = storyOptionsState.getSelectedCharactersForStory(); 
     const additionalDetails = storyOptionsState.additionalDetails; 
 
-    // --- DEBUG: Log detallado de parámetros ANTES de construir payload --- 
-    // console.log("🔍 DEBUG PRE-PAYLOAD: Datos Perfil ->", JSON.stringify(profileSettings, null, 2));
-    // console.log("🔍 DEBUG PRE-PAYLOAD: Personajes Seleccionados ->", JSON.stringify(selectedCharacters, null, 2));
-    // console.log("🔍 DEBUG PRE-PAYLOAD: Opciones Recibidas (función) ->", JSON.stringify(options, null, 2));
-    // console.log("🔍 DEBUG PRE-PAYLOAD: Duración (store) ->", storyOptionsState.currentStoryOptions.duration);
-    // console.log("🔍 DEBUG PRE-PAYLOAD: Detalles Adicionales ->", additionalDetails);
-    // --- FIN DEBUG ---
-
     if (!profileSettings) throw new Error("Perfil de usuario no cargado.");
     if (!selectedCharacters || selectedCharacters.length === 0) throw new Error("No hay personajes seleccionados.");
+    
+    // Validate language has a valid value
+    const language = profileSettings.language?.trim() || 'Español'; // Default to Spanish if empty
+    if (!language) {
+      throw new Error("El idioma del perfil no está configurado.");
+    }
 
     // --- Llamada ÚNICA al servicio que invoca la EF 'generate-story' ---
     const payload: GenerateStoryParams = {
@@ -45,7 +43,7 @@ export const generateStory = async (options: Partial<StoryOptions>): Promise<Sto
         moral: options.moral, 
         duration: storyOptionsState.currentStoryOptions.duration, 
       },
-      language: profileSettings.language, 
+      language, 
       childAge: profileSettings.childAge ?? 5, 
       specialNeed: profileSettings.specialNeed, 
       additionalDetails: additionalDetails || undefined, 
@@ -70,7 +68,7 @@ export const generateStory = async (options: Partial<StoryOptions>): Promise<Sto
         characters: selectedCharacters,
         genre: options.genre || "aventura",
         duration: options.duration || "medium",
-        language: payload.language,
+        language,
       },
       additional_details: additionalDetails, 
       createdAt: new Date().toISOString(),
@@ -101,10 +99,11 @@ export const generateStory = async (options: Partial<StoryOptions>): Promise<Sto
 
     return story; 
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error al generar historia en storyGenerator:", error);
+    const errorMessage = error instanceof Error ? error.message : "Inténtalo de nuevo.";
     toast.error("Error al generar la historia", {
-      description: error?.message || "Inténtalo de nuevo.",
+      description: errorMessage,
     });
     // Considera si también deberías llamar a resetStoryOptions aquí
     storyOptionsState.resetStoryOptions(); 

@@ -84,7 +84,7 @@ export const getUserProfile = async (userId: string): Promise<{ success: boolean
         if (data) {
             // Mapea todos los campos recuperados
             const profile: ProfileSettings = {
-                language: data.language,
+                language: data.language || 'Español', // Default to Spanish if empty
                 childAge: data.child_age,
                 specialNeed: data.special_need,
                 stripe_customer_id: data.stripe_customer_id,
