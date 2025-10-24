@@ -37,5 +37,14 @@ export const APP_CONFIG = {
     privacy: '/privacy-policy',
     contact: '/contact',
     changelog: '/changelog'
+  },
+
+  /**
+   * Configuración de logos de colaboración para PDFs
+   */
+  pdfCollaboration: {
+    enabled: import.meta.env.VITE_LOGO_COLABORATION === 'true' || false,
+    logoName: import.meta.env.VITE_LOGO_COLABORATION_NAME || '',
+    logoPath: '/logotipos'
   }
 }; 

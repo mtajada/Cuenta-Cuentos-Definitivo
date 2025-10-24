@@ -9,12 +9,18 @@ interface ImageValidationResult {
   cover: boolean;
   scene_1: boolean;
   scene_2: boolean;
+  scene_3: boolean;
+  scene_4: boolean;
+  closing: boolean;
   allValid: boolean;
   missingImages: string[];
   imageUrls?: {
     cover?: string;
     scene_1?: string;
     scene_2?: string;
+    scene_3?: string;
+    scene_4?: string;
+    closing?: string;
   };
 }
 
@@ -31,6 +37,9 @@ interface IllustratedPdfGenerationOptions extends StoryPdfGenerationOptions {
     cover: string;
     scene_1: string;
     scene_2: string;
+    scene_3: string;
+    scene_4: string;
+    closing: string;
   };
 }
 
@@ -54,10 +63,20 @@ interface CompleteIllustratedPdfOptions extends StoryPdfGenerationOptions {
 
 /**
  * Service for handling story PDF generation with image validation and illustrated PDF creation
+ * 
+ * DEV MODE CONFIGURATION:
+ * - Set DEV_MODE = true to use local preview images from /public/tale-preview/
+ * - Set DEV_MODE = false to use production flow (Supabase storage + AI generation)
+ * - In dev mode: image generation is skipped, validation always returns true, local images are used
  */
 export class StoryPdfService {
-  private static readonly REQUIRED_IMAGES = [IMAGES_TYPE.COVER, IMAGES_TYPE.SCENE_1, IMAGES_TYPE.SCENE_2];
+  private static readonly REQUIRED_IMAGES = [IMAGES_TYPE.COVER, IMAGES_TYPE.SCENE_1, IMAGES_TYPE.SCENE_2, IMAGES_TYPE.SCENE_3, IMAGES_TYPE.SCENE_4, IMAGES_TYPE.CLOSING];
   private static readonly IMAGE_BUCKET = 'images-stories';
+  
+  // TEMPORARY: Development mode to use local preview images
+  // TODO: Set to false when ready for production
+  private static readonly DEV_MODE = process.env.VITE_PDF_TEST || false;
+  private static readonly DEV_IMAGES_PATH = '/tale-preview';
 
 
 
@@ -68,10 +87,36 @@ export class StoryPdfService {
    * @returns Promise with validation results and image URLs if available
    */
   static async validateRequiredImages(storyId: string, chapterId: string): Promise<ImageValidationResult> {
+    // TEMPORARY: In dev mode, use local preview images
+    if (this.DEV_MODE) {
+      console.log('[StoryPdfService] 🔧 DEV MODE: Using local preview images from', this.DEV_IMAGES_PATH);
+      return {
+        cover: true,
+        scene_1: true,
+        scene_2: true,
+        scene_3: true,
+        scene_4: true,
+        closing: true,
+        allValid: true,
+        missingImages: [],
+        imageUrls: {
+          cover: `${this.DEV_IMAGES_PATH}/cover.jpeg`,
+          scene_1: `${this.DEV_IMAGES_PATH}/scene_1.jpeg`,
+          scene_2: `${this.DEV_IMAGES_PATH}/scene_2.jpeg`,
+          scene_3: `${this.DEV_IMAGES_PATH}/scene_3.jpeg`,
+          scene_4: `${this.DEV_IMAGES_PATH}/scene_4.jpeg`,
+          closing: `${this.DEV_IMAGES_PATH}/scene_4.jpeg`
+        }
+      };
+    }
+
     const validationResult: ImageValidationResult = {
       cover: false,
       scene_1: false,
       scene_2: false,
+      scene_3: false,
+      scene_4: false,
+      closing: false,
       allValid: false,
       missingImages: [],
       imageUrls: {}
@@ -110,7 +155,7 @@ export class StoryPdfService {
         }
       }
 
-      validationResult.allValid = validationResult.cover && validationResult.scene_1 && validationResult.scene_2;
+      validationResult.allValid = validationResult.cover && validationResult.scene_1 && validationResult.scene_2 && validationResult.scene_3 && validationResult.scene_4 && validationResult.closing;
       console.log('[StoryPdfService] Image validation results:', validationResult);
       
       return validationResult;
@@ -160,26 +205,34 @@ export class StoryPdfService {
       const pageHeight = pdf.internal.pageSize.getHeight();
       
       // Colors and styles for children's book
-      const textColor = '#2c3e50'; // Darker text for better readability over images
+      const textColor = '#2c3e50'; // Kept for compatibility
       const titleColor = '#BB79D1';
       
       // Convert image URLs to base64 data URLs
       const coverImageData = await this.loadImageAsDataUrl(options.imageUrls.cover);
       const scene1ImageData = await this.loadImageAsDataUrl(options.imageUrls.scene_1);
       const scene2ImageData = await this.loadImageAsDataUrl(options.imageUrls.scene_2);
+      const scene3ImageData = await this.loadImageAsDataUrl(options.imageUrls.scene_3);
+      const scene4ImageData = await this.loadImageAsDataUrl(options.imageUrls.scene_4);
+      const closingImageData = await this.loadImageAsDataUrl(options.imageUrls.closing);
       
       // Add illustrated cover page
       await this.addIllustratedCoverPage(pdf, options.title, options.author, coverImageData);
       
-      // Add illustrated content pages
+      // Add illustrated content pages with alternating text/image structure
       await this.addIllustratedContentPages(
         pdf, 
         options.content, 
         textColor, 
         options.title,
         scene1ImageData,
-        scene2ImageData
+        scene2ImageData,
+        scene3ImageData,
+        scene4ImageData
       );
+      
+      // Add closing image page
+      await this.addClosingImagePage(pdf, closingImageData);
       
       // Add back cover (same as standard)
       await this.addBackCoverPage(pdf);
@@ -229,6 +282,9 @@ export class StoryPdfService {
       [IMAGES_TYPE.COVER]: 'Portada',
       [IMAGES_TYPE.SCENE_1]: 'Escena 1',
       [IMAGES_TYPE.SCENE_2]: 'Escena 2',
+      [IMAGES_TYPE.SCENE_3]: 'Escena 3',
+      [IMAGES_TYPE.SCENE_4]: 'Escena 4',
+      [IMAGES_TYPE.CLOSING]: 'Cierre',
       [IMAGES_TYPE.CHARACTER]: 'Personaje'
     };
     
@@ -268,8 +324,27 @@ export class StoryPdfService {
   }
 
   /**
-   * Loads an image from URL and converts it to base64 data URL
-   * @param imageUrl Public URL of the image
+   * Loads collaboration logo image if enabled
+   * @returns Promise with logo data or null if disabled
+   */
+  private static async loadCollaborationLogo(): Promise<string | null> {
+    if (!APP_CONFIG.pdfCollaboration.enabled || !APP_CONFIG.pdfCollaboration.logoName) {
+      return null;
+    }
+
+    try {
+      const logoUrl = `${APP_CONFIG.pdfCollaboration.logoPath}/${APP_CONFIG.pdfCollaboration.logoName}`;
+      console.log('[StoryPdfService] Loading collaboration logo:', logoUrl);
+      return await this.loadImageAsDataUrl(logoUrl);
+    } catch (error) {
+      console.error('[StoryPdfService] Error loading collaboration logo:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Loads image from URL and converts to base64 data URL
+   * @param imageUrl URL of the image (can be remote or local)
    * @returns Promise with base64 data URL
    */
   private static async loadImageAsDataUrl(imageUrl: string): Promise<string> {
@@ -278,7 +353,12 @@ export class StoryPdfService {
       
       return new Promise((resolve, reject) => {
         const img = new Image();
-        img.crossOrigin = 'anonymous'; // Enable CORS
+        
+        // Only set crossOrigin for remote URLs, not for local dev images
+        const isLocalUrl = imageUrl.startsWith('/') || imageUrl.startsWith(window.location.origin);
+        if (!isLocalUrl) {
+          img.crossOrigin = 'anonymous';
+        }
         
         img.onload = () => {
           try {
@@ -299,7 +379,7 @@ export class StoryPdfService {
             
             // Convert to data URL
             const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-            console.log('[StoryPdfService] Image loaded and converted to data URL');
+            console.log('[StoryPdfService] ✅ Image loaded and converted to data URL');
             resolve(dataUrl);
           } catch (error) {
             console.error('[StoryPdfService] Error converting image to data URL:', error);
@@ -308,7 +388,7 @@ export class StoryPdfService {
         };
         
         img.onerror = () => {
-          console.error('[StoryPdfService] Error loading image from URL:', imageUrl);
+          console.error('[StoryPdfService] ❌ Error loading image from URL:', imageUrl);
           reject(new Error(`Failed to load image from URL: ${imageUrl}`));
         };
         
@@ -320,7 +400,7 @@ export class StoryPdfService {
     }
   }
 
-    /**
+  /**
    * Creates an illustrated cover page using the cover image
    * @param pdf jsPDF instance
    * @param title Story title
@@ -333,11 +413,99 @@ export class StoryPdfService {
     
     try {
       if (coverImageData) {
-        // Add cover image as full background - no overlays, image contains the title
+        // Add cover image as full background
         pdf.addImage(coverImageData, 'JPEG', 0, 0, pageWidth, pageHeight);
         
-        // Only add TaleMe logo in corner for branding
-        await this.addLogoToPage(pdf, 15, 15, 25);
+        // Add discrete white footer strip at bottom
+        const stripHeight = 25; // mm - discrete footer
+        const stripY = pageHeight - stripHeight;
+        pdf.setFillColor(255, 255, 255);
+        pdf.rect(0, stripY, pageWidth, stripHeight, 'F');
+        
+        // Load collaboration logo if enabled
+        const collabLogoData = await this.loadCollaborationLogo();
+        
+        // Calculate logo positioning (smaller, more discrete)
+        const logoHeight = 12; // mm - reduced size for discretion
+        const logoY = stripY + (stripHeight - logoHeight) / 2;
+        const logoMargin = 15; // mm from edges
+        
+        if (collabLogoData) {
+          // Two logos: collaboration logo on left, TaleMe logo on right
+          const collabLogoX = logoMargin;
+          
+          // Add collaboration logo
+          const collabLogo = new Image();
+          collabLogo.src = collabLogoData;
+          await new Promise<void>((resolve) => {
+            collabLogo.onload = () => {
+              const aspectRatio = collabLogo.width / collabLogo.height;
+              const logoWidth = logoHeight * aspectRatio;
+              pdf.addImage(collabLogoData, 'PNG', collabLogoX, logoY, logoWidth, logoHeight);
+              resolve();
+            };
+            collabLogo.onerror = () => {
+              console.error('[StoryPdfService] Error loading collaboration logo');
+              resolve();
+            };
+          });
+          
+          // Load TaleMe logo to calculate its width based on aspect ratio
+          const talemeLogo = new Image();
+          talemeLogo.src = '/logotipos/logo-taleme-pdf.png';
+          await new Promise<void>((resolve) => {
+            talemeLogo.onload = () => {
+              const talemeAspectRatio = talemeLogo.width / talemeLogo.height;
+              const talemeLogoWidth = logoHeight * talemeAspectRatio;
+              const talemeLogoX = pageWidth - logoMargin - talemeLogoWidth;
+              
+              // Add TaleMe logo on the right
+              const canvas = document.createElement('canvas');
+              canvas.width = talemeLogo.width;
+              canvas.height = talemeLogo.height;
+              const ctx = canvas.getContext('2d');
+              
+              if (ctx) {
+                ctx.drawImage(talemeLogo, 0, 0);
+                const logoData = canvas.toDataURL('image/png');
+                pdf.addImage(logoData, 'PNG', talemeLogoX, logoY, talemeLogoWidth, logoHeight);
+              }
+              resolve();
+            };
+            talemeLogo.onerror = () => {
+              console.error('[StoryPdfService] Error loading TaleMe logo');
+              resolve();
+            };
+          });
+        } else {
+          // Only TaleMe logo, centered
+          const talemeLogo = new Image();
+          talemeLogo.src = '/logotipos/logo-taleme-pdf.png';
+          await new Promise<void>((resolve) => {
+            talemeLogo.onload = () => {
+              const talemeAspectRatio = talemeLogo.width / talemeLogo.height;
+              const talemeLogoWidth = logoHeight * talemeAspectRatio;
+              const logoX = (pageWidth - talemeLogoWidth) / 2;
+              
+              const canvas = document.createElement('canvas');
+              canvas.width = talemeLogo.width;
+              canvas.height = talemeLogo.height;
+              const ctx = canvas.getContext('2d');
+              
+              if (ctx) {
+                ctx.drawImage(talemeLogo, 0, 0);
+                const logoData = canvas.toDataURL('image/png');
+                pdf.addImage(logoData, 'PNG', logoX, logoY, talemeLogoWidth, logoHeight);
+              }
+              resolve();
+            };
+            talemeLogo.onerror = () => {
+              console.error('[StoryPdfService] Error loading TaleMe logo (centered)');
+              resolve();
+            };
+          });
+        }
+        
       } else {
         // Fallback to standard cover if image fails
         pdf.setFillColor(255, 246, 224);
@@ -357,7 +525,86 @@ export class StoryPdfService {
           pdf.text(`por ${author}`, pageWidth / 2, pageHeight / 2 + 20, { align: 'center' });
         }
         
-        await this.addLogoToPage(pdf, 15, 15, 30);
+        // Add logos in footer even in fallback
+        const stripHeight = 25; // mm - discrete footer
+        const stripY = pageHeight - stripHeight;
+        const logoHeight = 12; // mm - reduced size
+        const logoY = stripY + (stripHeight - logoHeight) / 2;
+        const logoMargin = 15;
+        
+        pdf.setFillColor(255, 255, 255);
+        pdf.rect(0, stripY, pageWidth, stripHeight, 'F');
+        
+        const collabLogoData = await this.loadCollaborationLogo();
+        if (collabLogoData) {
+          const collabLogoX = logoMargin;
+          
+          const collabLogo = new Image();
+          collabLogo.src = collabLogoData;
+          await new Promise<void>((resolve) => {
+            collabLogo.onload = () => {
+              const aspectRatio = collabLogo.width / collabLogo.height;
+              const logoWidth = logoHeight * aspectRatio;
+              pdf.addImage(collabLogoData, 'PNG', collabLogoX, logoY, logoWidth, logoHeight);
+              resolve();
+            };
+            collabLogo.onerror = () => resolve();
+          });
+          
+          // Load TaleMe logo to calculate its width based on aspect ratio
+          const talemeLogo = new Image();
+          talemeLogo.src = '/logotipos/logo-taleme-pdf.png';
+          await new Promise<void>((resolve) => {
+            talemeLogo.onload = () => {
+              const talemeAspectRatio = talemeLogo.width / talemeLogo.height;
+              const talemeLogoWidth = logoHeight * talemeAspectRatio;
+              const talemeLogoX = pageWidth - logoMargin - talemeLogoWidth;
+              
+              const canvas = document.createElement('canvas');
+              canvas.width = talemeLogo.width;
+              canvas.height = talemeLogo.height;
+              const ctx = canvas.getContext('2d');
+              
+              if (ctx) {
+                ctx.drawImage(talemeLogo, 0, 0);
+                const logoData = canvas.toDataURL('image/png');
+                pdf.addImage(logoData, 'PNG', talemeLogoX, logoY, talemeLogoWidth, logoHeight);
+              }
+              resolve();
+            };
+            talemeLogo.onerror = () => {
+              console.error('[StoryPdfService] Error loading TaleMe logo in fallback');
+              resolve();
+            };
+          });
+        } else {
+          // Only TaleMe logo, centered (fallback case)
+          const talemeLogo = new Image();
+          talemeLogo.src = '/logotipos/logo-taleme-pdf.png';
+          await new Promise<void>((resolve) => {
+            talemeLogo.onload = () => {
+              const talemeAspectRatio = talemeLogo.width / talemeLogo.height;
+              const talemeLogoWidth = logoHeight * talemeAspectRatio;
+              const logoX = (pageWidth - talemeLogoWidth) / 2;
+              
+              const canvas = document.createElement('canvas');
+              canvas.width = talemeLogo.width;
+              canvas.height = talemeLogo.height;
+              const ctx = canvas.getContext('2d');
+              
+              if (ctx) {
+                ctx.drawImage(talemeLogo, 0, 0);
+                const logoData = canvas.toDataURL('image/png');
+                pdf.addImage(logoData, 'PNG', logoX, logoY, talemeLogoWidth, logoHeight);
+              }
+              resolve();
+            };
+            talemeLogo.onerror = () => {
+              console.error('[StoryPdfService] Error loading TaleMe logo (centered fallback)');
+              resolve();
+            };
+          });
+        }
       }
       
     } catch (error) {
@@ -369,13 +616,46 @@ export class StoryPdfService {
   }
 
   /**
-   * Creates illustrated content pages with scene backgrounds
+   * Splits story content into 4 sections for each scene
+   * @param content Story content
+   * @returns Array of 4 content sections
+   */
+  private static splitContentIntoSections(content: string): string[] {
+    // Split content into paragraphs
+    const paragraphs = content.split('\n\n').filter(p => p.trim() !== '');
+    
+    // If no double line breaks, split by single line breaks
+    const finalParagraphs = paragraphs.length > 1 
+      ? paragraphs 
+      : content.split('\n').filter(p => p.trim() !== '');
+    
+    const totalParagraphs = finalParagraphs.length;
+    const paragraphsPerSection = Math.ceil(totalParagraphs / 4);
+    
+    console.log(`[StoryPdfService] Splitting ${totalParagraphs} paragraphs into 4 sections (~${paragraphsPerSection} paragraphs each)`);
+    
+    const sections: string[] = [];
+    
+    for (let i = 0; i < 4; i++) {
+      const start = i * paragraphsPerSection;
+      const end = Math.min(start + paragraphsPerSection, totalParagraphs);
+      const sectionParagraphs = finalParagraphs.slice(start, end);
+      sections.push(sectionParagraphs.join('\n\n'));
+    }
+    
+    return sections;
+  }
+
+  /**
+   * Creates illustrated content pages with alternating text and image pages
    * @param pdf jsPDF instance
    * @param content Story content
-   * @param textColor Text color
-   * @param title Story title
+   * @param textColor Text color (kept for compatibility but not used with Georgia font)
+   * @param title Story title (not used in new format)
    * @param scene1ImageData Scene 1 image data
    * @param scene2ImageData Scene 2 image data
+   * @param scene3ImageData Scene 3 image data
+   * @param scene4ImageData Scene 4 image data
    */
   private static async addIllustratedContentPages(
     pdf: jsPDF,
@@ -383,127 +663,129 @@ export class StoryPdfService {
     textColor: string,
     title: string,
     scene1ImageData: string,
-    scene2ImageData: string
+    scene2ImageData: string,
+    scene3ImageData: string,
+    scene4ImageData: string
   ): Promise<void> {
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = 20;
+    const margin = 25;
     const effectiveWidth = pageWidth - 2 * margin;
     
-    // Split content into paragraphs
-    const paragraphs = content.split('\n\n').filter(p => p.trim() !== '');
-    if (paragraphs.length === 1) {
-      paragraphs.splice(0, 1, ...content.split('\n').filter(p => p.trim() !== ''));
-    }
+    // Split content into 4 sections, one for each scene
+    const sections = this.splitContentIntoSections(content);
+    const sceneImages = [scene1ImageData, scene2ImageData, scene3ImageData, scene4ImageData];
     
-    // Pre-calculate approximate number of pages needed for proper image distribution
-    const estimatedTotalPages = this.estimateRequiredPages(content, pageWidth, pageHeight, margin);
-    const scene1Pages = Math.ceil(estimatedTotalPages / 2); // First half uses scene_1
+    console.log('[StoryPdfService] Creating alternating text and image pages for 4 sections');
     
-    console.log(`[StoryPdfService] Estimated pages: ${estimatedTotalPages}, Scene1 pages: ${scene1Pages}, Scene2 pages: ${estimatedTotalPages - scene1Pages}`);
-    
-    let paragraphIndex = 0;
-    let pageIndex = 0;
-    const maxPages = Math.max(50, estimatedTotalPages * 2); // Safety limit to prevent infinite loops
-    
-    // Process all paragraphs, creating pages as needed
-    while (paragraphIndex < paragraphs.length && pageIndex < maxPages) {
+    // For each section: add text page, then image page
+    for (let i = 0; i < 4; i++) {
+      const sectionContent = sections[i];
+      const sceneImage = sceneImages[i];
+      
+      if (!sectionContent || sectionContent.trim() === '') {
+        console.log(`[StoryPdfService] Section ${i + 1} is empty, skipping`);
+        continue;
+      }
+      
+      // --- TEXT PAGE ---
+      console.log(`[StoryPdfService] Adding text page for section ${i + 1}`);
       pdf.addPage();
       
-      // Determine which background image to use (first half scene_1, second half scene_2)
-      const useScene1 = pageIndex < scene1Pages;
-      const backgroundImage = useScene1 ? scene1ImageData : scene2ImageData;
+      // White background
+      pdf.setFillColor(255, 255, 255);
+      pdf.rect(0, 0, pageWidth, pageHeight, 'F');
       
-      console.log(`[StoryPdfService] Page ${pageIndex + 1}/${maxPages}: Using ${useScene1 ? 'scene_1' : 'scene_2'} (Paragraph ${paragraphIndex + 1}/${paragraphs.length})`);
+      // Set Georgia font (or fallback)
+      // jsPDF supports: times, helvetica, courier - Georgia is not native but Times is similar
+      pdf.setFont('times', 'normal');
+      pdf.setFontSize(14);
+      pdf.setTextColor('#000000');
       
-      // Add background image - clean, no overlays
-      try {
-        pdf.addImage(backgroundImage, 'JPEG', 0, 0, pageWidth, pageHeight);
-      } catch (error) {
-        console.error('[StoryPdfService] Error adding background image:', error);
-        // Fallback to white background
-        pdf.setFillColor(255, 255, 255);
-        pdf.rect(0, 0, pageWidth, pageHeight, 'F');
-      }
+      // Split section into paragraphs
+      const paragraphs = sectionContent.split('\n\n').filter(p => p.trim() !== '');
+      const finalParagraphs = paragraphs.length > 0 ? paragraphs : sectionContent.split('\n').filter(p => p.trim() !== '');
       
-      // Add header with logo and title
-      await this.addHeaderToPage(pdf, title);
+      // Add paragraphs to page
+      let yPos = margin;
       
-      // Configure text style for children's book - clean black text over images
-      pdf.setFont('helvetica', 'bold');
-      pdf.setFontSize(22); // Large text for children's book readability over images
-      pdf.setTextColor('#000000'); // Pure black for maximum contrast
-       
-      // Add paragraphs to this page with varied positioning
-      let yPos = margin + 30; // Space for header
-      let paragraphsAddedThisPage = 0;
-       
-      // Process paragraphs until we run out of space or paragraphs
-      while (paragraphIndex < paragraphs.length && paragraphsAddedThisPage < 10) { // Max 10 paragraphs per page
-        const paragraph = paragraphs[paragraphIndex];
-        
-        // Skip empty paragraphs
-        if (!paragraph || paragraph.trim() === '') {
-          paragraphIndex++;
-          continue;
-        }
-        
-        // Add some randomness to text positioning for children's book feel
-        const randomOffset = (Math.random() - 0.5) * 10; // ±5mm random offset
-        const adjustedMargin = Math.max(15, Math.min(25, margin + randomOffset));
-        const adjustedWidth = pageWidth - 2 * adjustedMargin;
+      for (const paragraph of finalParagraphs) {
+        if (!paragraph || paragraph.trim() === '') continue;
         
         // Split text to fit width
-        const lines = pdf.splitTextToSize(paragraph, adjustedWidth);
+        const lines = pdf.splitTextToSize(paragraph, effectiveWidth);
         
-        // Check if paragraph fits on current page (adjusted for larger text)
-        const requiredSpace = lines.length * 15 + 25;
-        const availableSpace = pageHeight - margin - yPos;
+        // Calculate space needed
+        const lineHeight = 7; // mm per line for 14pt font
+        const paragraphSpacing = 5; // Extra space between paragraphs
+        const requiredSpace = lines.length * lineHeight + paragraphSpacing;
         
-        if (requiredSpace > availableSpace) {
-          // Paragraph doesn't fit, leave it for next page
-          console.log(`[StoryPdfService] Paragraph ${paragraphIndex + 1} doesn't fit (needs ${requiredSpace}mm, available ${availableSpace}mm)`);
-          break;
+        // Check if we need a new page
+        if (yPos + requiredSpace > pageHeight - margin) {
+          // Add another text page if content doesn't fit
+          pdf.addPage();
+          pdf.setFillColor(255, 255, 255);
+          pdf.rect(0, 0, pageWidth, pageHeight, 'F');
+          pdf.setFont('times', 'normal');
+          pdf.setFontSize(14);
+          pdf.setTextColor('#000000');
+          yPos = margin;
         }
         
-        // Add paragraph text with white border for better visibility over images
-        this.drawTextWithWhiteBorder(pdf, lines, adjustedMargin, yPos);
+        // Add text lines
+        for (const line of lines) {
+          pdf.text(line, margin, yPos);
+          yPos += lineHeight;
+        }
         
-        // Update position for next paragraph with more spacing for larger text
-        yPos += requiredSpace;
-        paragraphIndex++;
-        paragraphsAddedThisPage++;
+        yPos += paragraphSpacing; // Space between paragraphs
       }
       
-      // If no paragraphs were added to this page, force add one to prevent infinite loop
-      if (paragraphsAddedThisPage === 0 && paragraphIndex < paragraphs.length) {
-        console.warn(`[StoryPdfService] Force adding paragraph ${paragraphIndex + 1} to prevent infinite loop`);
-        const paragraph = paragraphs[paragraphIndex];
-        const adjustedWidth = pageWidth - 2 * margin;
-        const lines = pdf.splitTextToSize(paragraph, adjustedWidth);
-        
-        // Take only what fits on the page
-        const maxLines = Math.floor((pageHeight - margin - yPos) / 15);
-        const fitLines = lines.slice(0, Math.max(1, maxLines));
-        
-        this.drawTextWithWhiteBorder(pdf, fitLines, margin, yPos);
-        
-        // Split the paragraph if needed
-        if (lines.length > fitLines.length) {
-          const remainingLines = lines.slice(fitLines.length);
-          paragraphs[paragraphIndex] = remainingLines.join(' ');
-        } else {
-          paragraphIndex++;
-        }
+      // --- IMAGE PAGE ---
+      console.log(`[StoryPdfService] Adding image page for scene ${i + 1}`);
+      pdf.addPage();
+      
+      // Add full-page image without margins
+      try {
+        pdf.addImage(sceneImage, 'JPEG', 0, 0, pageWidth, pageHeight);
+      } catch (error) {
+        console.error(`[StoryPdfService] Error adding scene ${i + 1} image:`, error);
+        // Fallback to white page with error message
+        pdf.setFillColor(255, 255, 255);
+        pdf.rect(0, 0, pageWidth, pageHeight, 'F');
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(12);
+        pdf.setTextColor('#999999');
+        pdf.text(`[Imagen de escena ${i + 1} no disponible]`, pageWidth / 2, pageHeight / 2, { align: 'center' });
       }
-       
-      // Move to next page
-      pageIndex++;
     }
+    
+    console.log('[StoryPdfService] Finished creating illustrated content pages');
+  }
 
-    // Check if we hit the safety limit
-    if (pageIndex >= maxPages) {
-      console.warn(`[StoryPdfService] Hit maximum page limit (${maxPages}). Stopping generation to prevent infinite loop.`);
+  /**
+   * Adds closing image page showing character(s) walking away
+   * @param pdf jsPDF instance
+   * @param closingImageData Base64 closing image data
+   */
+  private static async addClosingImagePage(pdf: jsPDF, closingImageData: string): Promise<void> {
+    pdf.addPage();
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    
+    try {
+      console.log('[StoryPdfService] Adding closing image page...');
+      // Add full-page closing image
+      pdf.addImage(closingImageData, 'JPEG', 0, 0, pageWidth, pageHeight);
+    } catch (error) {
+      console.error('[StoryPdfService] Error adding closing image:', error);
+      // Fallback to white page with message
+      pdf.setFillColor(255, 255, 255);
+      pdf.rect(0, 0, pageWidth, pageHeight, 'F');
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(12);
+      pdf.setTextColor('#999999');
+      pdf.text('[Imagen de cierre no disponible]', pageWidth / 2, pageHeight / 2, { align: 'center' });
     }
   }
 
@@ -567,7 +849,7 @@ export class StoryPdfService {
   private static async addLogoToPage(pdf: jsPDF, x: number, y: number, width: number): Promise<void> {
     try {
       const logo = new Image();
-      logo.src = '/logo_png.png';
+      logo.src = '/logotipos/logo-taleme-pdf.png';
       
       await new Promise<void>((resolve) => {
         logo.onload = () => {
@@ -601,9 +883,14 @@ export class StoryPdfService {
   }
 
   /**
-   * Adds footer to current page
+   * Adds footer to current page (skips cover page)
    */
   private static addFooter(pdf: jsPDF, currentPage: number, totalPages: number): void {
+    // Skip footer on cover page (page 1)
+    if (currentPage === 1) {
+      return;
+    }
+    
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
     
@@ -613,8 +900,8 @@ export class StoryPdfService {
     // Add page number
     pdf.text(`${currentPage} / ${totalPages}`, pageWidth - 20, pageHeight - 10);
     
-    // Add app name and version
-    pdf.text(`${APP_CONFIG.name} v${APP_CONFIG.version}`, 20, pageHeight - 10);
+    // Add app name only (version removed)
+    pdf.text(`${APP_CONFIG.name}`, 20, pageHeight - 10);
   }
 
   /**
@@ -703,22 +990,40 @@ export class StoryPdfService {
       onProgress?.({
         currentStep: 'Validando imágenes existentes...',
         completedImages: 0,
-        totalImages: 3,
+        totalImages: 6,
         progress: 5
       });
       
       const imageValidation = await this.validateRequiredImages(storyId, chapterId);
       
-      let imageUrls: { cover: string; scene_1: string; scene_2: string };
+      let imageUrls: IllustratedPdfGenerationOptions['imageUrls'];
       
-      if (!imageValidation.allValid) {
+      // TEMPORARY: In dev mode, skip image generation and use local images
+      if (this.DEV_MODE) {
+        console.log('[StoryPdfService] 🔧 DEV MODE: Skipping image generation, using local preview images');
+        imageUrls = {
+          cover: `${this.DEV_IMAGES_PATH}/cover.jpeg`,
+          scene_1: `${this.DEV_IMAGES_PATH}/scene_1.jpeg`,
+          scene_2: `${this.DEV_IMAGES_PATH}/scene_2.jpeg`,
+          scene_3: `${this.DEV_IMAGES_PATH}/scene_3.jpeg`,
+          scene_4: `${this.DEV_IMAGES_PATH}/scene_4.jpeg`,
+          closing: `${this.DEV_IMAGES_PATH}/scene_4.jpeg`
+        };
+        
+        onProgress?.({
+          currentStep: 'Usando imágenes de ejemplo...',
+          completedImages: 6,
+          totalImages: 6,
+          progress: 30
+        });
+      } else if (!imageValidation.allValid) {
         console.log('[StoryPdfService] Missing images detected, generating them...');
         
         // Step 2: Generate missing images with progress tracking
         onProgress?.({
           currentStep: 'Generando imágenes del cuento...',
           completedImages: 0,
-          totalImages: 3,
+          totalImages: 6,
           progress: 10
         });
         
@@ -734,7 +1039,7 @@ export class StoryPdfService {
           onProgress?.({
             currentStep: 'Generando PDF con fondo blanco...',
             completedImages: 0,
-            totalImages: 3,
+            totalImages: 6,
             progress: 80
           });
           
@@ -749,7 +1054,7 @@ export class StoryPdfService {
           onProgress?.({
             currentStep: 'PDF fallback generado exitosamente',
             completedImages: 0,
-            totalImages: 3,
+            totalImages: 6,
             progress: 100
           });
           
@@ -763,15 +1068,18 @@ export class StoryPdfService {
         imageUrls = {
           cover: imageValidation.imageUrls!.cover!,
           scene_1: imageValidation.imageUrls!.scene_1!,
-          scene_2: imageValidation.imageUrls!.scene_2!
+          scene_2: imageValidation.imageUrls!.scene_2!,
+          scene_3: imageValidation.imageUrls!.scene_3!,
+          scene_4: imageValidation.imageUrls!.scene_4!,
+          closing: imageValidation.imageUrls!.closing!
         };
       }
       
       // Step 3: Generate illustrated PDF
       onProgress?.({
         currentStep: 'Generando PDF ilustrado...',
-        completedImages: 3,
-        totalImages: 3,
+        completedImages: 6,
+        totalImages: 6,
         progress: 85
       });
       
@@ -786,8 +1094,8 @@ export class StoryPdfService {
       
       onProgress?.({
         currentStep: 'PDF generado exitosamente',
-        completedImages: 3,
-        totalImages: 3,
+        completedImages: 6,
+        totalImages: 6,
         progress: 100
       });
       
@@ -809,7 +1117,7 @@ export class StoryPdfService {
   private static async generateImagesWithProgress(
     options: { title: string; content: string; storyId: string; chapterId: string },
     onProgress?: (progress: ImageGenerationProgress) => void
-  ): Promise<{ success: boolean; imageUrls?: { cover: string; scene_1: string; scene_2: string }; error?: string }> {
+  ): Promise<{ success: boolean; imageUrls?: { cover: string; scene_1: string; scene_2: string; scene_3: string; scene_4: string; closing: string }; error?: string }> {
     try {
       const { title, content, storyId, chapterId } = options;
       
@@ -819,7 +1127,7 @@ export class StoryPdfService {
       onProgress?.({
         currentStep: 'Iniciando generación de imágenes...',
         completedImages: 0,
-        totalImages: 3,
+        totalImages: 6,
         progress: 20
       });
       
@@ -834,7 +1142,7 @@ export class StoryPdfService {
         onProgress?.({
           currentStep: 'Generando imágenes con IA...',
           completedImages: 0,
-          totalImages: 3,
+          totalImages: 6,
           progress: Math.round(currentProgress)
         });
       }, 1000); // Update every second
@@ -858,7 +1166,7 @@ export class StoryPdfService {
         }
         
         // Map results to image URLs
-        const imageUrls: { cover?: string; scene_1?: string; scene_2?: string } = {};
+        const imageUrls: { cover?: string; scene_1?: string; scene_2?: string; scene_3?: string; scene_4?: string; closing?: string } = {};
         
         result.images.forEach(img => {
           if (img.type === IMAGES_TYPE.COVER) {
@@ -867,17 +1175,26 @@ export class StoryPdfService {
             imageUrls.scene_1 = img.url;
           } else if (img.type === IMAGES_TYPE.SCENE_2) {
             imageUrls.scene_2 = img.url;
+          } else if (img.type === IMAGES_TYPE.SCENE_3) {
+            imageUrls.scene_3 = img.url;
+          } else if (img.type === IMAGES_TYPE.SCENE_4) {
+            imageUrls.scene_4 = img.url;
+          } else if (img.type === IMAGES_TYPE.CLOSING) {
+            imageUrls.closing = img.url;
           }
         });
         
         // Validate we have all required images
-        const hasAllImages = imageUrls.cover && imageUrls.scene_1 && imageUrls.scene_2;
+        const hasAllImages = imageUrls.cover && imageUrls.scene_1 && imageUrls.scene_2 && imageUrls.scene_3 && imageUrls.scene_4 && imageUrls.closing;
         
         if (!hasAllImages) {
           const missingImages: string[] = [];
           if (!imageUrls.cover) missingImages.push('Portada');
           if (!imageUrls.scene_1) missingImages.push('Escena 1');
           if (!imageUrls.scene_2) missingImages.push('Escena 2');
+          if (!imageUrls.scene_3) missingImages.push('Escena 3');
+          if (!imageUrls.scene_4) missingImages.push('Escena 4');
+          if (!imageUrls.closing) missingImages.push('Cierre');
           
           return {
             success: false,
@@ -887,8 +1204,8 @@ export class StoryPdfService {
         
         onProgress?.({
           currentStep: 'Imágenes generadas exitosamente',
-          completedImages: 3,
-          totalImages: 3,
+          completedImages: 6,
+          totalImages: 6,
           progress: 80
         });
         
@@ -897,7 +1214,10 @@ export class StoryPdfService {
           imageUrls: {
             cover: imageUrls.cover!,
             scene_1: imageUrls.scene_1!,
-            scene_2: imageUrls.scene_2!
+            scene_2: imageUrls.scene_2!,
+            scene_3: imageUrls.scene_3!,
+            scene_4: imageUrls.scene_4!,
+            closing: imageUrls.closing!
           }
         };
         
