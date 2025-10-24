@@ -21,6 +21,12 @@ export const APP_CONFIG = {
   websiteUrl: 'https://taleme.app',
   
   /**
+   * Supabase configuration
+   */
+  supabaseUrl: import.meta.env.VITE_SUPABASE_URL || '',
+  supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
+  
+  /**
    * Enlaces de redes sociales
    */
   socialLinks: {

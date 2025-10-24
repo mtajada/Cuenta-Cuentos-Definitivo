@@ -44,6 +44,9 @@ import ProfileConfigPage from './pages/ProfileConfigPage';
 import SettingsPage from './pages/SettingsPage';
 import PlansPage from './pages/PlansPage';
 
+// Admin Pages
+import AdminIllustratedPdfPanel from './pages/AdminIllustratedPdfPanel';
+
 const queryClient = new QueryClient();
 
 const App = () => {
@@ -68,6 +71,9 @@ const App = () => {
                 <Route path="/privacy-policy" element={<PrivacyPolicy />} />
                 <Route path="/contact" element={<Contact />} />
                 <Route path="/changelog" element={<Changelog />} />
+                
+                {/* Admin routes - Protected by internal code */}
+                <Route path="/admin/illustrated-pdf" element={<AdminIllustratedPdfPanel />} />
 
                 {/* Payment routes */}
                 <Route path="/payment-success" element={<AuthGuard><PaymentSuccess /></AuthGuard>} />
