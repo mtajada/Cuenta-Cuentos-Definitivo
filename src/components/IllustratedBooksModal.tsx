@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, BookOpen, Sparkles, Plus, Library } from 'lucide-react';
+import { X, BookOpen, Sparkles, Plus, Library, Download, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 interface IllustratedBooksModalProps {
@@ -88,7 +88,7 @@ export default function IllustratedBooksModal({ isOpen, onClose }: IllustratedBo
                 transition={{ delay: 0.2 }}
                 className="text-2xl font-bold text-center mb-3 bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent"
               >
-                ¡Libros Ilustrados Disponibles!
+                Nuevo formato de libro ilustrado mejorado
               </motion.h2>
 
               {/* Description */}
@@ -96,10 +96,48 @@ export default function IllustratedBooksModal({ isOpen, onClose }: IllustratedBo
                 initial={{ y: 20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 transition={{ delay: 0.3 }}
-                className="text-gray-600 text-center mb-8 leading-relaxed"
+                className="text-gray-600 text-center mb-6 leading-relaxed"
               >
-                Ahora puedes crear y descargar hermosos libros ilustrados con imágenes generadas por IA que dan vida a tus cuentos.
+                Un diseño más limpio, tipografías mejoradas y maquetación optimizada. Mira un ejemplo rápido a continuación.
               </motion.p>
+
+              {/* PDF Sample Preview */
+              // Replace embedded preview with actions: open in new tab or download
+              }
+              <motion.div
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.35 }}
+                className="mb-6"
+              >
+                <div className="rounded-xl border border-purple-200 overflow-hidden shadow-sm">
+                  <div className="px-4 py-2 bg-gradient-to-r from-purple-50 to-pink-50 text-sm text-purple-700 font-medium">
+                    Vista previa (ejemplo)
+                  </div>
+                  <div className="p-4 bg-gray-50">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3 text-purple-800">
+                        <div className="w-8 h-8 rounded-md bg-white shadow flex items-center justify-center">
+                          <BookOpen className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium leading-tight">Libro ilustrado de ejemplo (PDF)</p>
+                          <p className="text-xs text-purple-700/70">Formato mejorado y maquetación optimizada</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href="/previews/book-preview.pdf"
+                          download
+                          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-purple-200 bg-white text-purple-700 text-xs font-semibold hover:bg-purple-50"
+                        >
+                          <Download className="h-4 w-4" /> Descargar
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
 
               {/* Action buttons */}
               <div className="space-y-3">

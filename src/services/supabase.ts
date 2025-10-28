@@ -6,10 +6,12 @@ import {
     Story,
     StoryChapter,
     StoryCharacter,
+    StoryScenes,
 } from "../types";
 
 // --- Importa la instancia ÚNICA del cliente Supabase ---
 import { supabase } from "../supabaseClient"; // Ajusta esta ruta si es necesario
+import { ScenesGenerationService } from "./ai/scenesGenerationService";
 
 // --- Listener de Auth (Opcional, solo para logging) ---
 // Ya no inicializamos el cliente aquí, solo usamos el importado.
@@ -257,6 +259,7 @@ export const syncStory = async (userId: string, story: Story): Promise<{ success
             user_id: userId,
             title: story.title,
             content: story.content,
+            scenes: story.scenes, // NUEVO: guardar scenes en la base de datos
             audio_url: story.audioUrl,
             moral: story.options.moral,
             genre: story.options.genre,
@@ -274,6 +277,46 @@ export const syncStory = async (userId: string, story: Story): Promise<{ success
         return { success: true };
     } catch (error) {
         console.error("Fallo general en syncStory:", error);
+        return { success: false, error };
+    }
+};
+
+/**
+ * Updates only the scenes field for a story
+ * @param storyId Story identifier
+ * @param scenes Scenes structure to update
+ * @returns Promise with success status
+ */
+export const updateStoryScenes = async (storyId: string, scenes: StoryScenes): Promise<{ success: boolean; error?: any }> => {
+    try {
+        console.log(`[updateStoryScenes] Updating scenes for story ${storyId}`);
+        
+        // Validate scenes structure
+        const requiredFields = ['character', 'cover', 'scene_1', 'scene_2', 'scene_3', 'scene_4', 'closing'];
+        for (const field of requiredFields) {
+            if (!scenes[field as keyof StoryScenes] || typeof scenes[field as keyof StoryScenes] !== 'string') {
+                console.error(`[updateStoryScenes] Invalid scenes: missing or invalid field ${field}`);
+                return { success: false, error: new Error(`Scenes inválidos: falta el campo ${field}`) };
+            }
+        }
+
+        const { error } = await supabase
+            .from("stories")
+            .update({ 
+                scenes: scenes,
+                updated_at: new Date()
+            })
+            .eq("id", storyId);
+
+        if (error) {
+            console.error(`[updateStoryScenes] Error updating scenes for story ${storyId}:`, error);
+            throw error;
+        }
+
+        console.log(`[updateStoryScenes] Scenes updated successfully for story ${storyId}`);
+        return { success: true };
+    } catch (error) {
+        console.error("[updateStoryScenes] General error:", error);
         return { success: false, error };
     }
 };
@@ -300,12 +343,13 @@ export const getUserStories = async (userId: string): Promise<{ success: boolean
                 id: story.id,
                 title: story.title || "Historia sin título",
                 content: story.content,
+                scenes: story.scenes, // NUEVO: incluir scenes al cargar desde BD
                 audioUrl: story.audio_url,
                 options: {
                     moral: story.moral,
                     genre: story.genre,
                     duration: story.duration,
-                    character: {
+                    characters: [{
                         id: characterData?.id || 'deleted_character',
                         name: characterData?.name || 'Personaje Eliminado',
                         hobbies: characterData?.hobbies || [],
@@ -313,7 +357,7 @@ export const getUserStories = async (userId: string): Promise<{ success: boolean
                         profession: characterData?.profession || '',
                         characterType: characterData?.character_type || 'Personalizado',
                         personality: characterData?.personality || '',
-                    } as StoryCharacter,
+                    }] as StoryCharacter[],
                 },
                 createdAt: story.created_at,
                 additional_details: story.additional_details, // <-- Incluir aquí
@@ -327,6 +371,49 @@ export const getUserStories = async (userId: string): Promise<{ success: boolean
         return { success: false, error };
     }
 };
+
+/**
+ * Generates scenes for a single story on-demand (used when generating illustrated PDF)
+ * @param storyId Story identifier
+ * @param content Story content
+ * @param title Story title
+ * @param language Story language
+ * @returns Promise with generated scenes or throws error
+ */
+export async function generateScenesOnDemand(
+    storyId: string,
+    content: string,
+    title: string,
+    language?: string
+): Promise<StoryScenes> {
+    console.log(`[generateScenesOnDemand] Generating scenes for story ${storyId} (${title})`);
+    
+    try {
+        // Call edge function to generate scenes
+        const scenes = await ScenesGenerationService.generateScenesFromContent({
+            storyId,
+            content,
+            title,
+            language: language || 'Español'
+        });
+
+        // Update database with generated scenes
+        const updateResult = await updateStoryScenes(storyId, scenes);
+        
+        if (!updateResult.success) {
+            console.error(`[generateScenesOnDemand] Failed to save scenes for story ${storyId}:`, updateResult.error);
+            throw new Error(`No se pudieron guardar los scenes generados: ${updateResult.error}`);
+        }
+
+        console.log(`[generateScenesOnDemand] ✓ Successfully generated and saved scenes for story ${storyId}`);
+        return scenes;
+        
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`[generateScenesOnDemand] Failed to generate scenes for story ${storyId}:`, errorMessage);
+        throw error;
+    }
+}
 
 /**
  * Obtiene el número de capítulos existentes para una historia específica.

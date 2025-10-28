@@ -66,12 +66,31 @@ interface GenerateStoryRequestBody {
 interface StoryGenerationResult {
   title: string;
   content: string;
+  scenes: {
+    character: string;
+    cover: string;
+    scene_1: string;
+    scene_2: string;
+    scene_3: string;
+    scene_4: string;
+    closing: string;
+  };
 }
 
 function isValidStoryResult(data: unknown): data is StoryGenerationResult {
+  const record = data as Record<string, unknown>;
   return !!data &&
-    typeof (data as Record<string, unknown>).title === 'string' &&
-    typeof (data as Record<string, unknown>).content === 'string';
+    typeof record.title === 'string' &&
+    typeof record.content === 'string' &&
+    !!record.scenes &&
+    typeof record.scenes === 'object' &&
+    typeof (record.scenes as Record<string, unknown>).character === 'string' &&
+    typeof (record.scenes as Record<string, unknown>).cover === 'string' &&
+    typeof (record.scenes as Record<string, unknown>).scene_1 === 'string' &&
+    typeof (record.scenes as Record<string, unknown>).scene_2 === 'string' &&
+    typeof (record.scenes as Record<string, unknown>).scene_3 === 'string' &&
+    typeof (record.scenes as Record<string, unknown>).scene_4 === 'string' &&
+    typeof (record.scenes as Record<string, unknown>).closing === 'string';
 }
 
 // --- Main Handler ---
@@ -324,7 +343,7 @@ serve(async (req: Request) => {
       response_format: { type: "json_object" }, // Request JSON output
       temperature: 0.8, // From original generationConfig
       top_p: 0.95,      // From original generationConfig
-      max_tokens: 16000 // From original generationConfig, ensure adequate for Gemini via OpenAI
+      max_tokens: 20000 // Increased to accommodate scenes generation
     });
 
     const aiResponseContent = chatCompletion.choices[0]?.message?.content;
@@ -341,6 +360,7 @@ serve(async (req: Request) => {
     // 7. Procesar Respuesta JSON de la IA
     let finalTitle = 'Aventura Inolvidable'; // Default
     let finalContent = ''; // Default
+    let finalScenes: StoryGenerationResult['scenes'] | null = null; // Nuevo
     let parsedSuccessfully = false;
 
     if (aiResponseContent) {
@@ -350,8 +370,10 @@ serve(async (req: Request) => {
         if (isValidStoryResult(storyResult)) {
           finalTitle = cleanExtractedText(storyResult.title, 'title');
           finalContent = cleanExtractedText(storyResult.content, 'content');
+          finalScenes = storyResult.scenes; // Guardar scenes
           parsedSuccessfully = true;
           console.log(`[${functionVersion}] Parsed AI JSON successfully. Title: "${finalTitle}"`);
+          console.log(`[${functionVersion}] Scenes validated: ${Object.keys(storyResult.scenes).length} keys`);
         } else {
           console.warn(`[${functionVersion}] AI response JSON structure is invalid. Received: ${aiResponseContent.substring(0, 500)}...`);
         }
@@ -391,6 +413,7 @@ serve(async (req: Request) => {
           if (isValidStoryResult(storyResult)) {
             finalTitle = cleanExtractedText(storyResult.title, 'title');
             finalContent = cleanExtractedText(storyResult.content, 'content');
+            finalScenes = storyResult.scenes; // Guardar scenes
             parsedSuccessfully = true;
             console.log(`[${functionVersion}] Parsed AI JSON successfully with aggressive cleaning. Title: "${finalTitle}"`);
           }
@@ -490,10 +513,20 @@ serve(async (req: Request) => {
     }
 
     // 9. Respuesta Final
-    return new Response(JSON.stringify({
+    const response: { content: string; title: string; scenes?: StoryGenerationResult['scenes'] } = {
       content: finalContent,
       title: finalTitle
-    }), {
+    };
+    
+    // Include scenes if they were successfully parsed
+    if (finalScenes) {
+      response.scenes = finalScenes;
+      console.log(`[${functionVersion}] Including scenes in response`);
+    } else {
+      console.warn(`[${functionVersion}] WARNING: No scenes were parsed from AI response. This will cause issues downstream.`);
+    }
+    
+    return new Response(JSON.stringify(response), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });

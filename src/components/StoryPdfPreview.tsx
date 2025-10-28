@@ -216,12 +216,17 @@ export default function StoryPdfPreview({
     }
   };
 
+  /**
+   * @description Handles illustrated story generation with dynamic payment validation
+   * Uses VITE_ENABLE_PAY to toggle between free generation and payment flow
+   */
   const handleGenerateIllustrated = async () => {
     try {
       setIsValidatingImages(true);
       setError(null);
       
-      console.log('[StoryPdfPreview] Starting illustrated story generation...');
+      const paymentEnabled = APP_CONFIG.enablePayment;
+      console.log(`[StoryPdfPreview] Starting illustrated story generation (Payment ${paymentEnabled ? 'ENABLED' : 'DISABLED'})...`);
       
       // Check if images exist
       const validationResult = await StoryPdfService.canGenerateIllustratedPdf(storyId, chapterId);
@@ -233,10 +238,19 @@ export default function StoryPdfPreview({
         console.log('[StoryPdfPreview] ✅ All required images exist. Proceeding with illustrated PDF generation and download...');
         await handleDownloadIllustratedPdf();
       } else {
-        // Images missing, show confirmation dialog for payment
+        // Missing images detected
         console.log('[StoryPdfPreview] ❌ Missing images detected:', validationResult.missingImages);
         setNeedsImageGeneration(true);
-        setShowConfirmGeneration(true);
+        
+        if (paymentEnabled) {
+          // Payment enabled: show payment confirmation
+          console.log('[StoryPdfPreview] Payment enabled: showing payment confirmation...');
+          setShowConfirmGeneration(true);
+        } else {
+          // Payment disabled: generate directly without payment (free mode)
+          console.log('[StoryPdfPreview] Payment disabled: generating directly WITHOUT payment...');
+          await handleDownloadIllustratedPdf();
+        }
       }
       
     } catch (err) {
@@ -248,8 +262,17 @@ export default function StoryPdfPreview({
   };
 
   const handleConfirmImageGeneration = async () => {
-    // This now redirects to payment instead of generating
-    await handleCheckout();
+    // Check if payment is enabled
+    if (APP_CONFIG.enablePayment) {
+      // Payment enabled: redirect to checkout
+      console.log('[StoryPdfPreview] Payment enabled, redirecting to checkout...');
+      await handleCheckout();
+    } else {
+      // Payment disabled: generate illustrated PDF directly (for testing/development)
+      console.log('[StoryPdfPreview] Payment disabled (VITE_ENABLE_PAY=false), generating illustrated PDF directly...');
+      setShowConfirmGeneration(false);
+      await handleDownloadIllustratedPdf();
+    }
   };
 
   const generateIllustratedPdfDirectly = async () => {
@@ -276,7 +299,10 @@ export default function StoryPdfPreview({
         imageUrls: {
           cover: imageValidation.imageUrls!.cover!,
           scene_1: imageValidation.imageUrls!.scene_1!,
-          scene_2: imageValidation.imageUrls!.scene_2!
+          scene_2: imageValidation.imageUrls!.scene_2!,
+          scene_3: imageValidation.imageUrls!.scene_3!,
+          scene_4: imageValidation.imageUrls!.scene_4!,
+          closing: imageValidation.imageUrls!.closing!
         }
       });
       
@@ -443,6 +469,18 @@ export default function StoryPdfPreview({
             </div>
           )}
 
+          {(isGeneratingIllustrated || isGenerating || Boolean(generationProgress)) && (
+            <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex items-start">
+                <AlertCircle className="h-5 w-5 text-yellow-700 mr-3 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-yellow-800">Importante: no cierres ni recargues esta página</p>
+                  <p className="text-xs text-yellow-700">La generación puede tardar 2-3 minutos. Cerrar o refrescar puede interrumpir el proceso.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Payment success and download button */}
           {paymentSuccess && (
             <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
@@ -492,8 +530,40 @@ export default function StoryPdfPreview({
                   <p className="text-sm text-orange-700 mb-3">
                     Para generar el cuento ilustrado necesitamos llenarlo de magia con imágenes y color. 
                   </p>
+                  {/* Ejemplo del nuevo formato ilustrado */}
+                  <div className="mb-4 rounded-lg border border-orange-200 overflow-hidden bg-white shadow-sm">
+                    <div className="px-3 py-2 text-xs font-medium text-orange-800 bg-orange-100/60">
+                      Ejemplo del nuevo formato de libro ilustrado
+                    </div>
+                    <div className="p-3 bg-orange-50/40">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3 text-orange-800">
+                          <div className="w-7 h-7 rounded bg-white shadow flex items-center justify-center">
+                            <FileText className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-medium leading-tight">PDF de ejemplo</p>
+                            <p className="text-[11px] text-orange-700/80">Formato ilustrado mejorado</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <a
+                            href="/previews/book-preview.pdf"
+                            download
+                            className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-orange-200 bg-white text-orange-700 text-[11px] font-semibold hover:bg-orange-100"
+                          >
+                            <Download className="h-3.5 w-3.5" /> Descargar
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                   <p className="text-sm text-orange-700 mb-4">
-                    <span  className="font-bold">Este proceso puede tomar 2-3 minutos después de la compra. ¿Deseas continuar con el pago?</span>
+                    <span className="font-bold">
+                      {APP_CONFIG.enablePayment 
+                        ? 'Este proceso puede tomar 2-3 minutos después de la compra. ¿Deseas continuar con el pago?'
+                        : 'Este proceso puede tomar 2-3 minutos. ¿Deseas continuar con la generación?'}
+                    </span>
                   </p>
                   <div className="flex space-x-3">
                     <Button
@@ -510,7 +580,9 @@ export default function StoryPdfPreview({
                       ) : (
                         <>
                           <CheckCircle className="h-4 w-4 mr-2" />
-                          Sí, pagar y generar (2.98€)
+                          {APP_CONFIG.enablePayment 
+                            ? 'Sí, pagar y generar (9.90€)'
+                            : 'Sí, generar gratis'}
                         </>
                       )}
                     </Button>
@@ -576,9 +648,15 @@ export default function StoryPdfPreview({
                   <div className="flex items-center mb-2">
                     <Palette className="h-5 w-5 text-purple-600 mr-2" />
                     <h4 className="font-semibold text-purple-800">Cuento Ilustrado</h4>
-                    <span className="ml-2 px-2 py-1 bg-purple-100 text-purple-800 text-xs font-medium rounded-full">
-                      2.98€
-                    </span>
+                    {APP_CONFIG.enablePayment ? (
+                      <span className="ml-2 px-2 py-1 bg-purple-100 text-purple-800 text-xs font-medium rounded-full">
+                        9.90€
+                      </span>
+                    ) : (
+                      <span className="ml-2 px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">
+                        GRATIS (desarrollo)
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm text-purple-700">
                     PDF con imágenes generadas por IA que ilustran el cuento

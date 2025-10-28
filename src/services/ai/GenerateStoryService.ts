@@ -1,5 +1,5 @@
 // src/services/ai/GenerateStoryService.ts
-import { StoryOptions, Story } from "../../types"; // Importar Story si no está
+import { StoryOptions, Story, StoryScenes } from "../../types"; // Importar Story si no está
 import { supabase } from "../../supabaseClient";
 
 export interface GenerateStoryParams {
@@ -14,6 +14,7 @@ export interface GenerateStoryParams {
 export interface GenerateStoryResponse {
   content: string;
   title: string;
+  scenes: StoryScenes; // NUEVO: prompts de imágenes generados por IA
 }
 
 export class GenerateStoryService {
@@ -51,14 +52,15 @@ export class GenerateStoryService {
         throw new Error(message);
       }
 
-      // Validar que la respuesta tiene el formato esperado { content: string, title: string }
-      if (!data || typeof data.content !== 'string' || typeof data.title !== 'string') {
+      // Validar que la respuesta tiene el formato esperado { content: string, title: string, scenes: object }
+      if (!data || typeof data.content !== 'string' || typeof data.title !== 'string' || !data.scenes) {
         console.error('Respuesta inesperada de generate-story:', data);
-        throw new Error('La respuesta de generate-story no contiene contenido y título válidos.');
+        throw new Error('La respuesta de generate-story no contiene contenido, título y scenes válidos.');
       }
 
       console.log('Respuesta de generate-story recibida (título):', data.title);
-      return data; // Devolver el objeto { content, title } completo
+      console.log('Respuesta de generate-story recibida (scenes):', Object.keys(data.scenes));
+      return data; // Devolver el objeto { content, title, scenes } completo
 
     } catch (error) {
       console.error('Error en GenerateStoryService.generateStoryWithAI:', error);

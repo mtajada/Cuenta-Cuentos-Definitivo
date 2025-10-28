@@ -46,7 +46,7 @@ serve(async (req: Request) => {
     }
 
     // Validate imageType
-    const validImageTypes = ['cover', 'scene_1', 'scene_2'];
+    const validImageTypes = ['cover', 'scene_1', 'scene_2', 'scene_3', 'scene_4', 'closing', 'character'];
     if (!validImageTypes.includes(imageType)) {
       console.error('[UPLOAD_STORY_IMAGE] Invalid image type:', imageType);
       return new Response(

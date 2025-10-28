@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from "react-router-dom";
-import { Settings, User, Star, ChevronRight, BookOpen, Sparkles } from "lucide-react";
+import { Settings, User, Star, ChevronRight, BookOpen, Sparkles, ExternalLink, Download, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { useUserStore } from "../store/user/userStore";
 import { useStoriesStore } from "../store/stories/storiesStore";
@@ -14,6 +14,7 @@ export default function Home() {
   const { generatedStories } = useStoriesStore();
   const { toast } = useToast();
   const [showIllustratedModal, setShowIllustratedModal] = useState(false);
+  const [showPromoRibbon, setShowPromoRibbon] = useState(true);
 
   useEffect(() => {
     const needsProfileSetup = !hasCompletedProfile();
@@ -85,6 +86,55 @@ export default function Home() {
         <div className="flex flex-col items-center mt-10 mb-8 select-none">
           <img src="/logo_png.png" alt="TaleMe Logo" className="w-80 max-w-md mx-auto mb-4 drop-shadow-xl" />
         </div>
+
+        {/* Cintillo promocional: nuevo formato ilustrado */}
+        {showPromoRibbon && (
+          <motion.div
+            initial={{ y: -10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ type: "spring", duration: 0.5 }}
+            className="w-full px-4 mb-6"
+          >
+            <div className="relative max-w-xl mx-auto rounded-2xl overflow-hidden shadow-lg ring-1 ring-black/5">
+              <div className="absolute inset-0 bg-gradient-to-r from-purple-500 to-pink-500 opacity-90"></div>
+              <div className="relative p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-white">
+                <div className="flex items-start gap-3">
+                  <div className="shrink-0 w-9 h-9 rounded-xl bg-white/20 backdrop-blur flex items-center justify-center">
+                    <BookOpen className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-sm sm:text-base font-semibold leading-tight">Nuevo formato de libro ilustrado mejorado</p>
+                    <p className="text-xs text-white/90">Mírala en acción o descárgala como ejemplo.</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <a
+                    href="/previews/book-preview.pdf"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white/15 hover:bg-white/25 text-xs font-semibold"
+                  >
+                    <ExternalLink className="h-4 w-4" /> Ver
+                  </a>
+                  <a
+                    href="/previews/book-preview.pdf"
+                    download
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white text-purple-700 text-xs font-semibold hover:bg-purple-50"
+                  >
+                    <Download className="h-4 w-4" /> Descargar
+                  </a>
+                  <button
+                    onClick={() => setShowPromoRibbon(false)}
+                    className="ml-1 inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20"
+                    aria-label="Cerrar aviso"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         {/* Botones principales */}
         <div className="flex flex-col items-center w-full max-w-xs gap-5 -mt-4">

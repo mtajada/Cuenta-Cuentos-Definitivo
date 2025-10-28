@@ -52,17 +52,16 @@ export const generateStory = async (options: Partial<StoryOptions>): Promise<Sto
     console.log("Enviando solicitud a la Edge Function generate-story con params:", payload);
 
     const storyResponse = await GenerateStoryService.generateStoryWithAI(payload);
-    // storyResponse ahora es { content: string, title: string }
-    console.log(`[storyGenerator_DEBUG] Title received from Service: "${storyResponse.title}"`);
+    // storyResponse ahora es { content: string, title: string, scenes: StoryScenes }
 
     // Los personajes seleccionados ya están guardados, no necesitamos save individual
     // Solo guardamos currentCharacter si se usó para creación de personaje nuevo
     
-    // Crear el objeto historia con título y contenido de la respuesta
     const story: Story = {
       id: storyId,
       title: storyResponse.title, 
-      content: storyResponse.content, 
+      content: storyResponse.content,
+      scenes: storyResponse.scenes, // NUEVO: incluir prompts de imágenes
       options: { 
         moral: options.moral || "Ser amable", 
         characters: selectedCharacters,
