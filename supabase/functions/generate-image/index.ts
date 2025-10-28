@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { OpenAI } from "https://esm.sh/openai@4.40.0";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.8';
-import { corsHeaders, getCorsHeaders } from '../_shared/cors.ts';
+import { getCorsHeaders } from '../_shared/cors.ts';
 
 // Configuration
 const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
@@ -21,8 +21,8 @@ const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
 interface ImageGenerationRequest {
   prompt: string;
-  size?: '1024x1024' | '1792x1024' | '1024x1792' | '1024x1536';
-  quality?: 'medium';
+  size?: '1024x1024' | '1792x1024' | '1024x1792';
+  quality?: 'standard' | 'hd';
   style?: 'vivid' | 'natural';
   background?: 'opaque';
   model?: string;
@@ -31,6 +31,17 @@ interface ImageGenerationRequest {
   chapterId?: string;
   imageType?: string;
 }
+
+type ImageParams = {
+  model: string;
+  prompt: string;
+  size: '1024x1024' | '1792x1024' | '1024x1792';
+  quality: 'standard' | 'hd';
+  n: number;
+  background?: 'opaque';
+  style?: 'vivid' | 'natural';
+  response_format?: 'b64_json';
+};
 
 /**
  * Secure Edge Function to generate images using OpenAI DALL-E
@@ -76,7 +87,7 @@ serve(async (req: Request) => {
     const { 
       prompt, 
       size = '1024x1024',
-      quality = 'medium',
+      quality = 'standard',
       style = 'vivid',
       model = 'gpt-image-1',
       storyId,
@@ -95,7 +106,7 @@ serve(async (req: Request) => {
     console.log(`[GENERATE_IMAGE_INFO] Generating image for user ${userId}...`);
 
     // 3. Generate image with OpenAI 
-    let imageParams: any = {
+    const imageParams: ImageParams = {
         model: model,
         prompt: prompt.trim(),
         size: size,
@@ -130,34 +141,6 @@ serve(async (req: Request) => {
 
     const imageData = response.data[0];
     let base64Image = imageData.b64_json;
-    
-    // Si no hay base64 (gpt-image-1), convertir desde URL
-    if (!base64Image && imageData.url) {
-        console.log(`[GENERATE_IMAGE_INFO] Converting image URL to base64 for user ${userId}...`);
-        try {
-            const imageResponse = await fetch(imageData.url);
-            if (!imageResponse.ok) {
-                throw new Error(`Failed to fetch image: ${imageResponse.status}`);
-            }
-            const imageBuffer = await imageResponse.arrayBuffer();
-            base64Image = btoa(String.fromCharCode(...new Uint8Array(imageBuffer)));
-            console.log(`[GENERATE_IMAGE_INFO] Successfully converted URL to base64 for user ${userId}`);
-        } catch (urlError) {
-            console.error(`[GENERATE_IMAGE_ERROR] Failed to convert URL to base64 for user ${userId}:`, urlError);
-            return new Response(JSON.stringify({ error: 'Error procesando la imagen generada.' }), { 
-                status: 502, 
-                headers: { ...dynamicCorsHeaders, 'Content-Type': 'application/json' } 
-            });
-        }
-    }
-    
-    if (!base64Image) {
-        console.error(`[GENERATE_IMAGE_ERROR] No image data available for user ${userId}`);
-        return new Response(JSON.stringify({ error: 'No se recibió imagen del servicio.' }), { 
-          status: 502, 
-          headers: { ...dynamicCorsHeaders, 'Content-Type': 'application/json' } 
-        });
-    }
 
     console.log(`[GENERATE_IMAGE_INFO] Image generated successfully for user ${userId}`);
 
@@ -168,8 +151,13 @@ serve(async (req: Request) => {
     if (storyId && chapterId && imageType) {
         try {
             const { data: uploadData, error: uploadError } = await supabaseAdmin.functions.invoke('upload-story-image', {
-                body: {
-                    imageBase64: base64Image,
+                body: imageData.url && !base64Image ? {
+                    imageUrl: imageData.url,
+                    imageType: imageType,
+                    storyId: storyId,
+                    chapterId: chapterId
+                } : {
+                    imageBase64: base64Image || undefined,
                     imageType: imageType,
                     storyId: storyId,
                     chapterId: chapterId
@@ -188,10 +176,35 @@ serve(async (req: Request) => {
         }
     }
     
+    // If we didn't upload, ensure we can return something useful
+    if (!publicUrl) {
+        // If base64 is not available but URL exists, try to convert now for response compatibility
+        if (!base64Image && imageData.url) {
+            try {
+                const imageResponse = await fetch(imageData.url);
+                if (!imageResponse.ok) {
+                    throw new Error(`Failed to fetch image: ${imageResponse.status}`);
+                }
+                const imageBuffer = await imageResponse.arrayBuffer();
+                base64Image = btoa(String.fromCharCode(...new Uint8Array(imageBuffer)));
+            } catch (urlError) {
+                console.error(`[GENERATE_IMAGE_ERROR] Failed to convert URL to base64 for response:`, urlError);
+            }
+        }
+        if (!base64Image && !imageData.url) {
+            console.error(`[GENERATE_IMAGE_ERROR] No image data available for user ${userId}`);
+            return new Response(JSON.stringify({ error: 'No se recibió imagen del servicio.' }), { 
+              status: 502, 
+              headers: { ...dynamicCorsHeaders, 'Content-Type': 'application/json' } 
+            });
+        }
+    }
+
     return new Response(
         JSON.stringify({
             success: true,
-            imageBase64: base64Image,
+            imageBase64: publicUrl ? undefined : base64Image,
+            imageUrl: publicUrl ? undefined : imageData.url,
             revisedPrompt: imageData.revised_prompt || prompt,
             publicUrl: publicUrl,
             storagePath: storagePath,

@@ -155,40 +155,38 @@ export function createUserPrompt_JsonFormat({ options, additionalDetails }: Crea
     // Response format instructions (MODIFICADO PARA JSON CON SCENES)
     request += `\n**Instrucciones de formato de respuesta (¡MUY IMPORTANTE!):**\n`;
     request += `* Debes responder con un ÚNICO objeto JSON válido.\n`;
-    request += `* El objeto JSON debe tener exactamente TRES claves (keys): "title", "content" y "scenes".\n`;
+    request += `* El objeto JSON debe tener exactamente TRES keys: "title", "content" y "scenes".\n`;
 
-    request += `\n**1. Clave "title":**\n`;
-    request += `* Debe ser una cadena de texto (string) que contenga ÚNICAMENTE el título generado.\n`;
-    request += `* Idealmente entre 4 y 7 palabras, en ${language}, usando "Sentence case".\n`;
+    request += `\n**1. key "title":**\n`;
+    request += `* Debe ser una cadena de texto con ÚNICAMENTE el título.\n`;
+    request += `* De entre 4 y 7 palabras, en ${language}, usando "Sentence case".\n`;
 
-    request += `\n**2. Clave "content":**\n`;
+    request += `\n**2. key "content":**\n`;
     request += `* Debe ser una cadena de texto (string) con TODO el contenido del cuento.\n`;
     request += `* Comienza directamente con la primera frase de la historia.\n`;
 
-    request += `\n**3. Clave "scenes" (NUEVA Y CRÍTICA):**\n`;
-    request += `* Debe ser un objeto JSON con las siguientes claves:\n`;
+    request += `\n**3. Clave "scenes" (IMPORTANTE):**\n`;
+    request += `* Debe ser un objeto JSON con las siguientes keys:\n`;
     request += `  - "character": Descripción visual DETALLADA del/los personaje(s) principal(es)\n`;
     request += `  - "cover": Prompt para imagen de portada\n`;
-    request += `  - "scene_1": Prompt para primera escena importante\n`;
-    request += `  - "scene_2": Prompt para segunda escena importante\n`;
-    request += `  - "scene_3": Prompt para tercera escena importante\n`;
-    request += `  - "scene_4": Prompt para cuarta escena importante\n`;
-    request += `  - "closing": Prompt para imagen de cierre (personaje de espaldas manteniendo la misma acción que la de la portada, por ejemplo si en la portada sale una princesa leyendo un libro, esta imagen closing debe ser la princesa igual pero de espalda leyendo el libro)\n`;
+    request += `  - "scene_1": Prompt para primera escena\n`;
+    request += `  - "scene_2": Prompt para segunda escena\n`;
+    request += `  - "scene_3": Prompt para tercera escena\n`;
+    request += `  - "scene_4": Prompt para cuarta escena\n`;
+    request += `  - "closing": Prompt para imagen de cierre (personaje de espaldas manteniendo la misma acción que la de la portada, por ejemplo si en la portada sale una princesa leyendo un libro, esta imagen debe ser la princesa igual pero de espalda)\n`;
 
     request += `\n**Instrucciones detalladas para "scenes.character":**\n`;
-    request += `Genera una descripción visual EXHAUSTIVA del/los personaje(s):\n`;
+    request += `Genera una descripción visual EXHAUSTIVA del o los personaje(s):\n`;
     request += `* Tipo de personaje (niño, niña, animal, criatura mágica, etc.)\n`;
     request += `* Edad aproximada o apariencia de edad\n`;
     request += `* Cabello: color, estilo, largo\n`;
-    request += `* Rostro: características distintivas, expresión habitual\n`;
     request += `* Vestimenta COMPLETA y DETALLADA:\n`;
     request += `  - Color(es) específico(s) de cada prenda\n`;
     request += `  - Tipo de prendas (camisa, pantalón, vestido, falda, etc.)\n`;
     request += `  - Accesorios (sombrero, gafas, mochila, corona, capa, bufanda, etc.)\n`;
     request += `  - Calzado (zapatos, botas, sandalias + color)\n`;
-    request += `* Rasgos físicos distintivos (altura, complexión)\n`;
     request += `* Si hay MÚLTIPLES personajes, describe cada uno con el mismo nivel de detalle\n`;
-    request += `Ejemplo: "Princesa de 8 años, cabello castaño largo con trenzas, ojos grandes color miel, sonrisa amable. Viste un vestido azul claro hasta las rodillas con detalles dorados en el borde, zapatos de tacón bajo marrones, corona pequeña de flores silvestres en la cabeza. Complexión delgada, altura promedio para su edad."\n`;
+    request += `Ejemplo: "Princesa de 8 años, cabello castaño largo con trenzas, ojos grandes color miel, sonrisa amable. Viste un vestido azul claro hasta las rodillas con detalles dorados en el borde, zapatos de tacón bajo marrones, corona pequeña de flores silvestres en la cabeza."\n`;
 
     request += `\n**Instrucciones para cada prompt de escena (cover, scene_1, scene_2, scene_3, scene_4):**\n`;
     request += `Cada prompt debe:\n`;
@@ -196,7 +194,7 @@ export function createUserPrompt_JsonFormat({ options, additionalDetails }: Crea
     request += `2. INCLUIR COMPLETA la descripción de "character" para mantener consistencia\n`;
     request += `3. Describir la escena específica del cuento:\n`;
     request += `   - Para "cover": Incluir título del cuento de manera artística, elementos que representen la historia\n`;
-    request += `   - Para "scene_1" a "scene_4": Describir el MOMENTO ESPECÍFICO de la historia que aparece en esa escena\n`;
+    request += `   - De "scene_1" a "scene_4": Describir el MOMENTO ESPECÍFICO de la historia que aparece en esa escena\n`;
     request += `4. Especificar composición visual:\n`;
     request += `   - Posición del personaje (centro, primer plano, etc.)\n`;
     request += `   - Acción que está realizando\n`;
@@ -210,9 +208,6 @@ export function createUserPrompt_JsonFormat({ options, additionalDetails }: Crea
     request += `2. De la misma forma y acciones que en el "cover" o portada pero de espaldas\n`;
     request += `3. Si hay múltiples personajes: especificar que están de la misma forma que la portada\n`;
     request += `4. Mantener la misma vestimenta RECONOCIBLE desde atrás:\n`;
-    request += `   - Colores de ropa visibles desde atrás\n`;
-    request += `   - Forma de vestido/pantalón/camisa reconocible\n`;
-    request += `   - Accesorios visibles (mochila, sombrero, peinado, etc.)\n`;
     request += `5. Escenario relacionado con el cuento\n`;
     request += `6. Transmitir sensación de despedida, conclusión, esperanza\n`;
     request += `Ejemplo: "Estilo acuarela tradicional infantil. [Descripción completa del personaje]. Vista de espaldas, la princesa camina alejándose hacia el horizonte del castillo. Se ve claramente su vestido azul claro y su corona de flores desde atrás. El sol está poniéndose, creando un ambiente cálido de despedida. Atmósfera de paz y nuevas aventuras."\n`;

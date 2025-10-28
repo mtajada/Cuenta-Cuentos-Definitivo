@@ -217,15 +217,16 @@ export default function StoryPdfPreview({
   };
 
   /**
-   * @description Handles illustrated story generation without payment validation (TEMPORARY)
-   * TODO: Re-enable payment validation when ready
+   * @description Handles illustrated story generation with dynamic payment validation
+   * Uses VITE_ENABLE_PAY to toggle between free generation and payment flow
    */
   const handleGenerateIllustrated = async () => {
     try {
       setIsValidatingImages(true);
       setError(null);
       
-      console.log('[StoryPdfPreview] Starting illustrated story generation (NO PAYMENT VALIDATION)...');
+      const paymentEnabled = APP_CONFIG.enablePayment;
+      console.log(`[StoryPdfPreview] Starting illustrated story generation (Payment ${paymentEnabled ? 'ENABLED' : 'DISABLED'})...`);
       
       // Check if images exist
       const validationResult = await StoryPdfService.canGenerateIllustratedPdf(storyId, chapterId);
@@ -237,15 +238,19 @@ export default function StoryPdfPreview({
         console.log('[StoryPdfPreview] ✅ All required images exist. Proceeding with illustrated PDF generation and download...');
         await handleDownloadIllustratedPdf();
       } else {
-        // TEMPORARY: Generate images directly without payment
-        // TODO: Uncomment below to re-enable payment flow
-        // console.log('[StoryPdfPreview] ❌ Missing images detected:', validationResult.missingImages);
-        // setNeedsImageGeneration(true);
-        // setShowConfirmGeneration(true);
+        // Missing images detected
+        console.log('[StoryPdfPreview] ❌ Missing images detected:', validationResult.missingImages);
+        setNeedsImageGeneration(true);
         
-        // TEMPORARY: Direct generation without payment
-        console.log('[StoryPdfPreview] ⚠️ Missing images detected, generating directly WITHOUT payment...');
-        await handleDownloadIllustratedPdf();
+        if (paymentEnabled) {
+          // Payment enabled: show payment confirmation
+          console.log('[StoryPdfPreview] Payment enabled: showing payment confirmation...');
+          setShowConfirmGeneration(true);
+        } else {
+          // Payment disabled: generate directly without payment (free mode)
+          console.log('[StoryPdfPreview] Payment disabled: generating directly WITHOUT payment...');
+          await handleDownloadIllustratedPdf();
+        }
       }
       
     } catch (err) {
@@ -513,7 +518,11 @@ export default function StoryPdfPreview({
                     Para generar el cuento ilustrado necesitamos llenarlo de magia con imágenes y color. 
                   </p>
                   <p className="text-sm text-orange-700 mb-4">
-                    <span  className="font-bold">Este proceso puede tomar 2-3 minutos después de la compra. ¿Deseas continuar con el pago?</span>
+                    <span className="font-bold">
+                      {APP_CONFIG.enablePayment 
+                        ? 'Este proceso puede tomar 2-3 minutos después de la compra. ¿Deseas continuar con el pago?'
+                        : 'Este proceso puede tomar 2-3 minutos. ¿Deseas continuar con la generación?'}
+                    </span>
                   </p>
                   <div className="flex space-x-3">
                     <Button
@@ -530,7 +539,9 @@ export default function StoryPdfPreview({
                       ) : (
                         <>
                           <CheckCircle className="h-4 w-4 mr-2" />
-                          Sí, pagar y generar (2.98€)
+                          {APP_CONFIG.enablePayment 
+                            ? 'Sí, pagar y generar (9.90€)'
+                            : 'Sí, generar gratis'}
                         </>
                       )}
                     </Button>
@@ -596,15 +607,15 @@ export default function StoryPdfPreview({
                   <div className="flex items-center mb-2">
                     <Palette className="h-5 w-5 text-purple-600 mr-2" />
                     <h4 className="font-semibold text-purple-800">Cuento Ilustrado</h4>
-                    {/* TEMPORARY: Free while payment is disabled */}
-                    <span className="ml-2 px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">
-                      GRATIS (temporal)
-                    </span>
-                    {/* TODO: Re-enable price tag when payment is re-enabled
-                    <span className="ml-2 px-2 py-1 bg-purple-100 text-purple-800 text-xs font-medium rounded-full">
-                      2.98€
-                    </span>
-                    */}
+                    {APP_CONFIG.enablePayment ? (
+                      <span className="ml-2 px-2 py-1 bg-purple-100 text-purple-800 text-xs font-medium rounded-full">
+                        9.90€
+                      </span>
+                    ) : (
+                      <span className="ml-2 px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">
+                        GRATIS (desarrollo)
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm text-purple-700">
                     PDF con imágenes generadas por IA que ilustran el cuento

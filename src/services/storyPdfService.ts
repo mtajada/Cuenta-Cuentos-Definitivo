@@ -87,28 +87,6 @@ export class StoryPdfService {
    * @returns Promise with validation results and image URLs if available
    */
   static async validateRequiredImages(storyId: string, chapterId: string): Promise<ImageValidationResult> {
-    // TEMPORARY: In dev mode, use local preview images
-    if (this.DEV_MODE) {
-      console.log('[StoryPdfService] 🔧 DEV MODE: Using local preview images from', this.DEV_IMAGES_PATH);
-      return {
-        cover: true,
-        scene_1: true,
-        scene_2: true,
-        scene_3: true,
-        scene_4: true,
-        closing: true,
-        allValid: true,
-        missingImages: [],
-        imageUrls: {
-          cover: `${this.DEV_IMAGES_PATH}/cover.jpeg`,
-          scene_1: `${this.DEV_IMAGES_PATH}/scene_1.jpeg`,
-          scene_2: `${this.DEV_IMAGES_PATH}/scene_2.jpeg`,
-          scene_3: `${this.DEV_IMAGES_PATH}/scene_3.jpeg`,
-          scene_4: `${this.DEV_IMAGES_PATH}/scene_4.jpeg`,
-          closing: `${this.DEV_IMAGES_PATH}/scene_4.jpeg`
-        }
-      };
-    }
 
     const validationResult: ImageValidationResult = {
       cover: false,
@@ -234,10 +212,7 @@ export class StoryPdfService {
       // Add closing image page
       await this.addClosingImagePage(pdf, closingImageData);
       
-      // Add back cover (same as standard)
-      await this.addBackCoverPage(pdf);
-      
-      // Add footer to all pages
+      // Add footer to all pages (excluding cover and closing pages)
       const totalPages = pdf.getNumberOfPages ? pdf.getNumberOfPages() : pdf.internal.pages.length - 1;
       for (let i = 1; i <= totalPages; i++) {
         pdf.setPage(i);
@@ -764,7 +739,7 @@ export class StoryPdfService {
   }
 
   /**
-   * Adds closing image page showing character(s) walking away
+   * Adds closing image page showing character(s) walking away with TaleMe branding footer
    * @param pdf jsPDF instance
    * @param closingImageData Base64 closing image data
    */
@@ -774,9 +749,66 @@ export class StoryPdfService {
     const pageHeight = pdf.internal.pageSize.getHeight();
     
     try {
-      console.log('[StoryPdfService] Adding closing image page...');
-      // Add full-page closing image
+      
+      // Add closing image as background
       pdf.addImage(closingImageData, 'JPEG', 0, 0, pageWidth, pageHeight);
+      
+      // Add white footer strip at bottom (similar to cover)
+      const stripHeight = 25; // mm - discrete footer
+      const stripY = pageHeight - stripHeight;
+      pdf.setFillColor(255, 255, 255);
+      pdf.rect(0, stripY, pageWidth, stripHeight, 'F');
+      
+      // Calculate logo positioning
+      const logoHeight = 12; // mm - reduced size for discretion
+      const logoY = stripY + (stripHeight - logoHeight) / 2;
+      
+      // Load TaleMe logo
+      const talemeLogo = new Image();
+      talemeLogo.src = '/logotipos/logo-taleme-pdf.png';
+      
+      await new Promise<void>((resolve) => {
+        talemeLogo.onload = () => {
+          const talemeAspectRatio = talemeLogo.width / talemeLogo.height;
+          const talemeLogoWidth = logoHeight * talemeAspectRatio;
+          const logoX = 15; // mm from left edge
+          
+          // Add TaleMe logo on the left
+          const canvas = document.createElement('canvas');
+          canvas.width = talemeLogo.width;
+          canvas.height = talemeLogo.height;
+          const ctx = canvas.getContext('2d');
+          
+          if (ctx) {
+            ctx.drawImage(talemeLogo, 0, 0);
+            const logoData = canvas.toDataURL('image/png');
+            pdf.addImage(logoData, 'PNG', logoX, logoY, talemeLogoWidth, logoHeight);
+            
+            // Add text aligned to the right
+            const textY = stripY + stripHeight / 2;
+            const rightMargin = 15; // mm from right edge
+            
+            // "Generado por TaleMe App" - aligned right
+            pdf.setFont('helvetica', 'bold');
+            pdf.setFontSize(10);
+            pdf.setTextColor('#777777');
+            pdf.text('Generado por TaleMe App', pageWidth - rightMargin, textY, { align: 'right' });
+            
+            // Year "2025" below - aligned right
+            pdf.setFont('helvetica', 'normal');
+            pdf.setFontSize(9);
+            pdf.setTextColor('#777777');
+            pdf.text('2025', pageWidth - rightMargin, textY + 5, { align: 'right' });
+          }
+          resolve();
+        };
+        
+        talemeLogo.onerror = () => {
+          console.error('[StoryPdfService] Error loading TaleMe logo for closing page');
+          resolve();
+        };
+      });
+      
     } catch (error) {
       console.error('[StoryPdfService] Error adding closing image:', error);
       // Fallback to white page with message
@@ -883,11 +915,11 @@ export class StoryPdfService {
   }
 
   /**
-   * Adds footer to current page (skips cover page)
+   * Adds footer to current page (skips cover and closing pages)
    */
   private static addFooter(pdf: jsPDF, currentPage: number, totalPages: number): void {
-    // Skip footer on cover page (page 1)
-    if (currentPage === 1) {
+    // Skip footer on cover page (page 1) and closing page (last page)
+    if (currentPage === 1 || currentPage === totalPages) {
       return;
     }
     
@@ -1125,24 +1157,63 @@ export class StoryPdfService {
       
       // Update progress for generation start
       onProgress?.({
+        currentStep: 'Verificando datos de la historia...',
+        completedImages: 0,
+        totalImages: 6,
+        progress: 5
+      });
+      
+      // 1. First, get story data from database (scenes, content, title)
+      const { data: storyData, error: storyError } = await supabase
+        .from('stories')
+        .select('scenes, content, title')
+        .eq('id', storyId)
+        .single();
+
+      if (storyError) {
+        throw new Error('No se pudo cargar la historia desde la base de datos');
+      }
+
+      let scenes = storyData?.scenes;
+
+      // 2. If scenes don't exist, generate them on-demand
+      if (!scenes) {
+        console.log('[StoryPdfService] ⚠️ No scenes found. Generating on-demand...');
+        
+        onProgress?.({
+          currentStep: 'Generando prompts de imágenes con IA...',
+          completedImages: 0,
+          totalImages: 6,
+          progress: 10
+        });
+
+        try {
+          // Import generateScenesOnDemand dynamically to avoid circular dependency
+          const { generateScenesOnDemand } = await import('./supabase');
+          
+          scenes = await generateScenesOnDemand(
+            storyId,
+            storyData.content,
+            storyData.title
+          );
+          
+          console.log('[StoryPdfService] ✓ Scenes generated successfully on-demand');
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Error desconocido';
+          console.error('[StoryPdfService] Failed to generate scenes on-demand:', errorMsg);
+          throw new Error(`No se pudieron generar los prompts de imágenes: ${errorMsg}`);
+        }
+      }
+
+      console.log('[StoryPdfService] Scenes available:', Object.keys(scenes));
+      
+      // Update progress before image generation
+      onProgress?.({
         currentStep: 'Iniciando generación de imágenes...',
         completedImages: 0,
         totalImages: 6,
         progress: 20
       });
-      
-      // 1. First, get scenes from database
-      const { data: storyData, error: storyError } = await supabase
-        .from('stories')
-        .select('scenes')
-        .eq('id', storyId)
-        .single();
-
-      if (storyError || !storyData?.scenes) {
-        throw new Error('No se encontraron los prompts de imágenes en la base de datos');
-      }
-
-      console.log('[StoryPdfService] Scenes retrieved from database:', Object.keys(storyData.scenes));
       
       // Incremental progress simulation based on 35 seconds max generation time
       let currentProgress = 20;
@@ -1161,11 +1232,11 @@ export class StoryPdfService {
       }, 1000); // Update every second
       
       try {
-        // 2. Generate images with prompts from database
+        // 3. Generate images with prompts (from database or generated on-demand)
         const result = await ImageGenerationService.generateStoryImages({
           storyId,
           chapterId,
-          scenes: storyData.scenes
+          scenes: scenes
         });
         
         clearInterval(progressInterval);
