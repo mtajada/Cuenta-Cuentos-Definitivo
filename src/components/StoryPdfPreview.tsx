@@ -248,8 +248,17 @@ export default function StoryPdfPreview({
   };
 
   const handleConfirmImageGeneration = async () => {
-    // This now redirects to payment instead of generating
-    await handleCheckout();
+    // Check if payment is enabled
+    if (APP_CONFIG.enablePayment) {
+      // Payment enabled: redirect to checkout
+      console.log('[StoryPdfPreview] Payment enabled, redirecting to checkout...');
+      await handleCheckout();
+    } else {
+      // Payment disabled: generate illustrated PDF directly (for testing/development)
+      console.log('[StoryPdfPreview] Payment disabled (VITE_ENABLE_PAY=false), generating illustrated PDF directly...');
+      setShowConfirmGeneration(false);
+      await handleDownloadIllustratedPdf();
+    }
   };
 
   const generateIllustratedPdfDirectly = async () => {

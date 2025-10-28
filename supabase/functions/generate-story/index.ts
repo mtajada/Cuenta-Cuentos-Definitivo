@@ -66,12 +66,31 @@ interface GenerateStoryRequestBody {
 interface StoryGenerationResult {
   title: string;
   content: string;
+  scenes: {
+    character: string;
+    cover: string;
+    scene_1: string;
+    scene_2: string;
+    scene_3: string;
+    scene_4: string;
+    closing: string;
+  };
 }
 
 function isValidStoryResult(data: unknown): data is StoryGenerationResult {
+  const record = data as Record<string, unknown>;
   return !!data &&
-    typeof (data as Record<string, unknown>).title === 'string' &&
-    typeof (data as Record<string, unknown>).content === 'string';
+    typeof record.title === 'string' &&
+    typeof record.content === 'string' &&
+    !!record.scenes &&
+    typeof record.scenes === 'object' &&
+    typeof (record.scenes as Record<string, unknown>).character === 'string' &&
+    typeof (record.scenes as Record<string, unknown>).cover === 'string' &&
+    typeof (record.scenes as Record<string, unknown>).scene_1 === 'string' &&
+    typeof (record.scenes as Record<string, unknown>).scene_2 === 'string' &&
+    typeof (record.scenes as Record<string, unknown>).scene_3 === 'string' &&
+    typeof (record.scenes as Record<string, unknown>).scene_4 === 'string' &&
+    typeof (record.scenes as Record<string, unknown>).closing === 'string';
 }
 
 // --- Main Handler ---
@@ -492,7 +511,8 @@ serve(async (req: Request) => {
     // 9. Respuesta Final
     return new Response(JSON.stringify({
       content: finalContent,
-      title: finalTitle
+      title: finalTitle,
+      scenes: storyResult.scenes // NUEVO: incluir scenes en respuesta
     }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" }

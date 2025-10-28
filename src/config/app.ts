@@ -27,6 +27,13 @@ export const APP_CONFIG = {
   supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
   
   /**
+   * Payment configuration
+   * When VITE_ENABLE_PAY is false, users can generate illustrated stories without payment
+   * Useful for development and testing purposes
+   */
+  enablePayment: import.meta.env.VITE_ENABLE_PAY === 'true',
+  
+  /**
    * Enlaces de redes sociales
    */
   socialLinks: {

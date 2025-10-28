@@ -703,13 +703,13 @@ export class StoryPdfService {
       onProgress?.({
         currentStep: 'Validando imágenes existentes...',
         completedImages: 0,
-        totalImages: 3,
+        totalImages: 6,
         progress: 5
       });
       
       const imageValidation = await this.validateRequiredImages(storyId, chapterId);
       
-      let imageUrls: { cover: string; scene_1: string; scene_2: string };
+      let imageUrls: { cover: string; scene_1: string; scene_2: string; scene_3: string; scene_4: string; closing: string };
       
       if (!imageValidation.allValid) {
         console.log('[StoryPdfService] Missing images detected, generating them...');
@@ -718,12 +718,12 @@ export class StoryPdfService {
         onProgress?.({
           currentStep: 'Generando imágenes del cuento...',
           completedImages: 0,
-          totalImages: 3,
+          totalImages: 6,
           progress: 10
         });
         
         const generationResult = await this.generateImagesWithProgress(
-          { title, content, storyId, chapterId },
+          { storyId, chapterId },
           onProgress
         );
         
@@ -734,7 +734,7 @@ export class StoryPdfService {
           onProgress?.({
             currentStep: 'Generando PDF con fondo blanco...',
             completedImages: 0,
-            totalImages: 3,
+            totalImages: 6,
             progress: 80
           });
           
@@ -749,7 +749,7 @@ export class StoryPdfService {
           onProgress?.({
             currentStep: 'PDF fallback generado exitosamente',
             completedImages: 0,
-            totalImages: 3,
+            totalImages: 6,
             progress: 100
           });
           
@@ -763,15 +763,18 @@ export class StoryPdfService {
         imageUrls = {
           cover: imageValidation.imageUrls!.cover!,
           scene_1: imageValidation.imageUrls!.scene_1!,
-          scene_2: imageValidation.imageUrls!.scene_2!
+          scene_2: imageValidation.imageUrls!.scene_2!,
+          scene_3: imageValidation.imageUrls!.scene_3!,
+          scene_4: imageValidation.imageUrls!.scene_4!,
+          closing: imageValidation.imageUrls!.closing!
         };
       }
       
       // Step 3: Generate illustrated PDF
       onProgress?.({
         currentStep: 'Generando PDF ilustrado...',
-        completedImages: 3,
-        totalImages: 3,
+        completedImages: 6,
+        totalImages: 6,
         progress: 85
       });
       
@@ -786,8 +789,8 @@ export class StoryPdfService {
       
       onProgress?.({
         currentStep: 'PDF generado exitosamente',
-        completedImages: 3,
-        totalImages: 3,
+        completedImages: 6,
+        totalImages: 6,
         progress: 100
       });
       
@@ -807,11 +810,11 @@ export class StoryPdfService {
    * @returns Promise with generation result and image URLs
    */
   private static async generateImagesWithProgress(
-    options: { title: string; content: string; storyId: string; chapterId: string },
+    options: { storyId: string; chapterId: string },
     onProgress?: (progress: ImageGenerationProgress) => void
-  ): Promise<{ success: boolean; imageUrls?: { cover: string; scene_1: string; scene_2: string }; error?: string }> {
+  ): Promise<{ success: boolean; imageUrls?: { cover: string; scene_1: string; scene_2: string; scene_3: string; scene_4: string; closing: string }; error?: string }> {
     try {
-      const { title, content, storyId, chapterId } = options;
+      const { storyId, chapterId } = options;
       
       console.log('[StoryPdfService] Generating images with progress tracking...');
       
@@ -819,9 +822,22 @@ export class StoryPdfService {
       onProgress?.({
         currentStep: 'Iniciando generación de imágenes...',
         completedImages: 0,
-        totalImages: 3,
+        totalImages: 6,
         progress: 20
       });
+      
+      // 1. First, get scenes from database
+      const { data: storyData, error: storyError } = await supabase
+        .from('stories')
+        .select('scenes')
+        .eq('id', storyId)
+        .single();
+
+      if (storyError || !storyData?.scenes) {
+        throw new Error('No se encontraron los prompts de imágenes en la base de datos');
+      }
+
+      console.log('[StoryPdfService] Scenes retrieved from database:', Object.keys(storyData.scenes));
       
       // Incremental progress simulation based on 35 seconds max generation time
       let currentProgress = 20;
@@ -834,18 +850,17 @@ export class StoryPdfService {
         onProgress?.({
           currentStep: 'Generando imágenes con IA...',
           completedImages: 0,
-          totalImages: 3,
+          totalImages: 6,
           progress: Math.round(currentProgress)
         });
       }, 1000); // Update every second
       
       try {
-        // Use the ImageGenerationService to generate all images
+        // 2. Generate images with prompts from database
         const result = await ImageGenerationService.generateStoryImages({
-          title,
-          content,
           storyId,
-          chapterId
+          chapterId,
+          scenes: storyData.scenes
         });
         
         clearInterval(progressInterval);
@@ -858,7 +873,7 @@ export class StoryPdfService {
         }
         
         // Map results to image URLs
-        const imageUrls: { cover?: string; scene_1?: string; scene_2?: string } = {};
+        const imageUrls: { cover?: string; scene_1?: string; scene_2?: string; scene_3?: string; scene_4?: string; closing?: string } = {};
         
         result.images.forEach(img => {
           if (img.type === IMAGES_TYPE.COVER) {
@@ -867,17 +882,26 @@ export class StoryPdfService {
             imageUrls.scene_1 = img.url;
           } else if (img.type === IMAGES_TYPE.SCENE_2) {
             imageUrls.scene_2 = img.url;
+          } else if (img.type === IMAGES_TYPE.SCENE_3) {
+            imageUrls.scene_3 = img.url;
+          } else if (img.type === IMAGES_TYPE.SCENE_4) {
+            imageUrls.scene_4 = img.url;
+          } else if (img.type === IMAGES_TYPE.CLOSING) {
+            imageUrls.closing = img.url;
           }
         });
         
         // Validate we have all required images
-        const hasAllImages = imageUrls.cover && imageUrls.scene_1 && imageUrls.scene_2;
+        const hasAllImages = imageUrls.cover && imageUrls.scene_1 && imageUrls.scene_2 && imageUrls.scene_3 && imageUrls.scene_4 && imageUrls.closing;
         
         if (!hasAllImages) {
           const missingImages: string[] = [];
           if (!imageUrls.cover) missingImages.push('Portada');
           if (!imageUrls.scene_1) missingImages.push('Escena 1');
           if (!imageUrls.scene_2) missingImages.push('Escena 2');
+          if (!imageUrls.scene_3) missingImages.push('Escena 3');
+          if (!imageUrls.scene_4) missingImages.push('Escena 4');
+          if (!imageUrls.closing) missingImages.push('Cierre');
           
           return {
             success: false,
@@ -887,8 +911,8 @@ export class StoryPdfService {
         
         onProgress?.({
           currentStep: 'Imágenes generadas exitosamente',
-          completedImages: 3,
-          totalImages: 3,
+          completedImages: 6,
+          totalImages: 6,
           progress: 80
         });
         
@@ -897,7 +921,10 @@ export class StoryPdfService {
           imageUrls: {
             cover: imageUrls.cover!,
             scene_1: imageUrls.scene_1!,
-            scene_2: imageUrls.scene_2!
+            scene_2: imageUrls.scene_2!,
+            scene_3: imageUrls.scene_3!,
+            scene_4: imageUrls.scene_4!,
+            closing: imageUrls.closing!
           }
         };
         

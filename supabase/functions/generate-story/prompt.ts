@@ -152,21 +152,92 @@ export function createUserPrompt_JsonFormat({ options, additionalDetails }: Crea
     // Title request (texto general sin cambios, se adapta al formato JSON abajo)
     request += `5. **Título:** Genera un título extraordinario (memorable, original, etc.). El título debe seguir el estilo "Sentence case", donde solo la primera palabra y los nombres propios comienzan con mayúscula. El título debe estar escrito en el mismo idioma seleccionado para la historia: ${language}.\n`;
 
-    // Response format instructions (MODIFICADO PARA JSON)
+    // Response format instructions (MODIFICADO PARA JSON CON SCENES)
     request += `\n**Instrucciones de formato de respuesta (¡MUY IMPORTANTE!):**\n`;
     request += `* Debes responder con un ÚNICO objeto JSON válido.\n`;
-    request += `* El objeto JSON debe tener exactamente dos claves (keys): "title" y "content".\n`;
-    request += `* El valor de la clave "title" debe ser una cadena de texto (string) que contenga ÚNICAMENTE el título generado (idealmente entre 4 y 7 palabras), respetando las indicaciones del punto 5 sobre el título (idioma ${language}, "Sentence case").\n`;
-    request += `* El valor de la clave "content" debe ser una cadena de texto (string) con TODO el contenido del cuento, comenzando directamente con la primera frase de la historia.\n`;
-    request += `* **IMPORTANTE - Caracteres especiales en JSON**: Dentro de los valores de "title" y "content", debes escapar correctamente:\n`;
-    request += `  - Saltos de línea como \\n (barra invertida + n)\n`;
-    request += `  - Comillas dobles como \\" (barra invertida + comilla)\n`;
-    request += `  - Barras invertidas como \\\\ (doble barra invertida)\n`;
-    request += `  - Tabulaciones como \\t (barra invertida + t)\n`;
-    request += `* Ejemplo del formato JSON esperado: {"title": "Un título extraordinario aquí", "content": "Había una vez en un lugar muy lejano...\\n\\nEn ese lugar mágico..."}\n`;
-    request += `* NO incluyas NADA antes del carácter '{' que inicia el objeto JSON.\n`;
-    request += `* NO incluyas NADA después del carácter '}' que finaliza el objeto JSON.\n`;
-    request += `* Asegúrate de que el JSON sea válido y pueda ser parseado por JSON.parse().\n`;
+    request += `* El objeto JSON debe tener exactamente TRES claves (keys): "title", "content" y "scenes".\n`;
+
+    request += `\n**1. Clave "title":**\n`;
+    request += `* Debe ser una cadena de texto (string) que contenga ÚNICAMENTE el título generado.\n`;
+    request += `* Idealmente entre 4 y 7 palabras, en ${language}, usando "Sentence case".\n`;
+
+    request += `\n**2. Clave "content":**\n`;
+    request += `* Debe ser una cadena de texto (string) con TODO el contenido del cuento.\n`;
+    request += `* Comienza directamente con la primera frase de la historia.\n`;
+
+    request += `\n**3. Clave "scenes" (NUEVA Y CRÍTICA):**\n`;
+    request += `* Debe ser un objeto JSON con las siguientes claves:\n`;
+    request += `  - "character": Descripción visual DETALLADA del/los personaje(s) principal(es)\n`;
+    request += `  - "cover": Prompt para imagen de portada\n`;
+    request += `  - "scene_1": Prompt para primera escena importante\n`;
+    request += `  - "scene_2": Prompt para segunda escena importante\n`;
+    request += `  - "scene_3": Prompt para tercera escena importante\n`;
+    request += `  - "scene_4": Prompt para cuarta escena importante\n`;
+    request += `  - "closing": Prompt para imagen de cierre (personaje de espaldas manteniendo la misma acción que la de la portada, por ejemplo si en la portada sale una princesa leyendo un libro, esta imagen closing debe ser la princesa igual pero de espalda leyendo el libro)\n`;
+
+    request += `\n**Instrucciones detalladas para "scenes.character":**\n`;
+    request += `Genera una descripción visual EXHAUSTIVA del/los personaje(s):\n`;
+    request += `* Tipo de personaje (niño, niña, animal, criatura mágica, etc.)\n`;
+    request += `* Edad aproximada o apariencia de edad\n`;
+    request += `* Cabello: color, estilo, largo\n`;
+    request += `* Rostro: características distintivas, expresión habitual\n`;
+    request += `* Vestimenta COMPLETA y DETALLADA:\n`;
+    request += `  - Color(es) específico(s) de cada prenda\n`;
+    request += `  - Tipo de prendas (camisa, pantalón, vestido, falda, etc.)\n`;
+    request += `  - Accesorios (sombrero, gafas, mochila, corona, capa, bufanda, etc.)\n`;
+    request += `  - Calzado (zapatos, botas, sandalias + color)\n`;
+    request += `* Rasgos físicos distintivos (altura, complexión)\n`;
+    request += `* Si hay MÚLTIPLES personajes, describe cada uno con el mismo nivel de detalle\n`;
+    request += `Ejemplo: "Princesa de 8 años, cabello castaño largo con trenzas, ojos grandes color miel, sonrisa amable. Viste un vestido azul claro hasta las rodillas con detalles dorados en el borde, zapatos de tacón bajo marrones, corona pequeña de flores silvestres en la cabeza. Complexión delgada, altura promedio para su edad."\n`;
+
+    request += `\n**Instrucciones para cada prompt de escena (cover, scene_1, scene_2, scene_3, scene_4):**\n`;
+    request += `Cada prompt debe:\n`;
+    request += `1. Comenzar con: "Estilo acuarela tradicional infantil, colores suaves y cálidos, bordes difuminados, paleta pasteles."\n`;
+    request += `2. INCLUIR COMPLETA la descripción de "character" para mantener consistencia\n`;
+    request += `3. Describir la escena específica del cuento:\n`;
+    request += `   - Para "cover": Incluir título del cuento de manera artística, elementos que representen la historia\n`;
+    request += `   - Para "scene_1" a "scene_4": Describir el MOMENTO ESPECÍFICO de la historia que aparece en esa escena\n`;
+    request += `4. Especificar composición visual:\n`;
+    request += `   - Posición del personaje (centro, primer plano, etc.)\n`;
+    request += `   - Acción que está realizando\n`;
+    request += `   - Escenario/fondo (bosque, castillo, jardín, etc.)\n`;
+    request += `   - Elementos importantes en la escena\n`;
+    request += `5. Mantener coherencia: misma vestimenta, mismos colores, mismos rasgos\n`;
+
+    request += `\n**Instrucciones específicas para "scenes.closing":**\n`;
+    request += `El prompt de cierre debe:\n`;
+    request += `1. Mostrar al/los personaje(s) de ESPALDAS (vista posterior, back view)\n`;
+    request += `2. De la misma forma y acciones que en el "cover" o portada pero de espaldas\n`;
+    request += `3. Si hay múltiples personajes: especificar que están de la misma forma que la portada\n`;
+    request += `4. Mantener la misma vestimenta RECONOCIBLE desde atrás:\n`;
+    request += `   - Colores de ropa visibles desde atrás\n`;
+    request += `   - Forma de vestido/pantalón/camisa reconocible\n`;
+    request += `   - Accesorios visibles (mochila, sombrero, peinado, etc.)\n`;
+    request += `5. Escenario relacionado con el cuento\n`;
+    request += `6. Transmitir sensación de despedida, conclusión, esperanza\n`;
+    request += `Ejemplo: "Estilo acuarela tradicional infantil. [Descripción completa del personaje]. Vista de espaldas, la princesa camina alejándose hacia el horizonte del castillo. Se ve claramente su vestido azul claro y su corona de flores desde atrás. El sol está poniéndose, creando un ambiente cálido de despedida. Atmósfera de paz y nuevas aventuras."\n`;
+
+    request += `\n**Formato JSON final esperado:**\n`;
+    request += `{\n`;
+    request += `  "title": "Título del cuento aquí",\n`;
+    request += `  "content": "Contenido completo del cuento...\\n\\nCon párrafos...",\n`;
+    request += `  "scenes": {\n`;
+    request += `    "character": "Descripción visual completa del personaje...",\n`;
+    request += `    "cover": "Estilo acuarela... [descripción personaje]... Portada con título...",\n`;
+    request += `    "scene_1": "Estilo acuarela... [descripción personaje]... Primera escena donde...",\n`;
+    request += `    "scene_2": "Estilo acuarela... [descripción personaje]... Segunda escena donde...",\n`;
+    request += `    "scene_3": "Estilo acuarela... [descripción personaje]... Tercera escena donde...",\n`;
+    request += `    "scene_4": "Estilo acuarela... [descripción personaje]... Cuarta escena donde...",\n`;
+    request += `    "closing": "Estilo acuarela... [descripción personaje de espaldas]... De la misma forma que en cover..."\n`;
+    request += `  }\n`;
+    request += `}\n`;
+
+    request += `\n**RECORDATORIOS CRÍTICOS:**\n`;
+    request += `* Escapa correctamente: \\n para saltos de línea, \\" para comillas, \\\\ para barras\n`;
+    request += `* NO incluyas NADA antes del '{' ni después del '}'\n`;
+    request += `* Asegúrate de que el JSON sea válido y parseable\n`;
+    request += `* CADA prompt de escena DEBE incluir la descripción completa del personaje\n`;
+    request += `* La vestimenta DEBE ser idéntica en todas las escenas\n`;
     request += `* NO uses markdown ni ningún otro formato DENTRO de los strings del JSON a menos que sea parte natural del texto del cuento.\n`;
 
     return request;
