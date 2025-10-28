@@ -216,12 +216,16 @@ export default function StoryPdfPreview({
     }
   };
 
+  /**
+   * @description Handles illustrated story generation without payment validation (TEMPORARY)
+   * TODO: Re-enable payment validation when ready
+   */
   const handleGenerateIllustrated = async () => {
     try {
       setIsValidatingImages(true);
       setError(null);
       
-      console.log('[StoryPdfPreview] Starting illustrated story generation...');
+      console.log('[StoryPdfPreview] Starting illustrated story generation (NO PAYMENT VALIDATION)...');
       
       // Check if images exist
       const validationResult = await StoryPdfService.canGenerateIllustratedPdf(storyId, chapterId);
@@ -233,10 +237,15 @@ export default function StoryPdfPreview({
         console.log('[StoryPdfPreview] ✅ All required images exist. Proceeding with illustrated PDF generation and download...');
         await handleDownloadIllustratedPdf();
       } else {
-        // Images missing, show confirmation dialog for payment
-        console.log('[StoryPdfPreview] ❌ Missing images detected:', validationResult.missingImages);
-        setNeedsImageGeneration(true);
-        setShowConfirmGeneration(true);
+        // TEMPORARY: Generate images directly without payment
+        // TODO: Uncomment below to re-enable payment flow
+        // console.log('[StoryPdfPreview] ❌ Missing images detected:', validationResult.missingImages);
+        // setNeedsImageGeneration(true);
+        // setShowConfirmGeneration(true);
+        
+        // TEMPORARY: Direct generation without payment
+        console.log('[StoryPdfPreview] ⚠️ Missing images detected, generating directly WITHOUT payment...');
+        await handleDownloadIllustratedPdf();
       }
       
     } catch (err) {
@@ -285,7 +294,9 @@ export default function StoryPdfPreview({
         imageUrls: {
           cover: imageValidation.imageUrls!.cover!,
           scene_1: imageValidation.imageUrls!.scene_1!,
-          scene_2: imageValidation.imageUrls!.scene_2!
+          scene_2: imageValidation.imageUrls!.scene_2!,
+          scene_3: imageValidation.imageUrls!.scene_3!,
+          scene_4: imageValidation.imageUrls!.scene_4!
         }
       });
       
@@ -585,9 +596,15 @@ export default function StoryPdfPreview({
                   <div className="flex items-center mb-2">
                     <Palette className="h-5 w-5 text-purple-600 mr-2" />
                     <h4 className="font-semibold text-purple-800">Cuento Ilustrado</h4>
+                    {/* TEMPORARY: Free while payment is disabled */}
+                    <span className="ml-2 px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">
+                      GRATIS (temporal)
+                    </span>
+                    {/* TODO: Re-enable price tag when payment is re-enabled
                     <span className="ml-2 px-2 py-1 bg-purple-100 text-purple-800 text-xs font-medium rounded-full">
                       2.98€
                     </span>
+                    */}
                   </div>
                   <p className="text-sm text-purple-700">
                     PDF con imágenes generadas por IA que ilustran el cuento

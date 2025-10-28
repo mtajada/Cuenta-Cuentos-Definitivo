@@ -160,6 +160,42 @@ ${storyContext}
 **INSTRUCCIONES PARA SEGUNDA ESCENA:**
 Genera una imagen de la SEGUNDA ESCENA más importante del cuento, donde el ${contentSummary.character} debe ser prominente. Representa otro momento crucial diferente al anterior, mostrando al protagonista en una situación distinta pero MANTENIENDO PERFECTAMENTE las características visuales establecidas en las imágenes anteriores.
 
+${baseStyle}`,
+
+      [IMAGES_TYPE.SCENE_3]: `${SYSTEM_PROMPT_BASE}
+
+${storyContext}
+
+**INSTRUCCIONES PARA TERCERA ESCENA:**
+Genera una imagen de la TERCERA ESCENA importante del cuento. El ${contentSummary.character} debe continuar siendo el foco principal. Ilustra un momento de desarrollo o giro en la historia, MANTENIENDO EXACTAMENTE la misma apariencia del personaje y estilo visual de las escenas anteriores.
+
+${baseStyle}`,
+
+      [IMAGES_TYPE.SCENE_4]: `${SYSTEM_PROMPT_BASE}
+
+${storyContext}
+
+**INSTRUCCIONES PARA CUARTA ESCENA:**
+Genera una imagen de la ESCENA FINAL o desenlace del cuento. El ${contentSummary.character} debe aparecer en el momento culminante o conclusión de la historia. Mantén perfecta consistencia visual con todas las imágenes anteriores, mostrando la resolución del cuento de forma visualmente satisfactoria.
+
+${baseStyle}`,
+
+      [IMAGES_TYPE.CLOSING]: `${SYSTEM_PROMPT_BASE}
+
+${storyContext}
+
+**INSTRUCCIONES PARA IMAGEN DE CIERRE:**
+Genera una imagen de CIERRE del cuento que muestre ${contentSummary.characterCount > 1 ? 'a los personajes principales' : `al ${contentSummary.character}`} de ESPALDAS caminando hacia el horizonte. ${contentSummary.characterCount > 1 ? 'Los personajes deben ir TOMADOS DE LA MANO, mostrando su vínculo y compañerismo.' : 'El personaje camina solo pero con confianza hacia su futuro.'} 
+
+La composición debe ser:
+- Vista posterior (back view) mostrando la espalda del/los personaje(s)
+- Caminando hacia un horizonte luminoso y prometedor
+- El escenario debe reflejar el ${contentSummary.setting} del cuento
+- Ambiente cálido de despedida y esperanza
+- Transmite un sentimiento de conclusión, paz y nuevas aventuras por venir
+
+La imagen debe mantener PERFECTAMENTE el estilo visual y las características físicas del/los personaje(s) establecidas en las imágenes anteriores. Esta es la despedida visual del cuento, debe ser emotiva y esperanzadora.
+
 ${baseStyle}`
     };
   }
@@ -167,9 +203,16 @@ ${baseStyle}`
   /**
    * Extracts key story elements for consistent image generation
    */
-  private static extractStoryElements(content: string): { character: string; setting: string; mood: string } {
+  private static extractStoryElements(content: string): { character: string; setting: string; mood: string; characterCount: number } {
     // Simple extraction logic - can be enhanced with AI analysis later
     const lowercaseContent = content.toLowerCase();
+    
+    // Detect character count (for closing image)
+    let characterCount = 1;
+    const multipleCharacterIndicators = ['dos personajes', 'ambos', 'juntos', 'acompañ', 'amigos', 'hermanos', 'compañeros'];
+    if (multipleCharacterIndicators.some(indicator => lowercaseContent.includes(indicator))) {
+      characterCount = 2;
+    }
     
     // Detect character types
     let character = 'personaje principal';
@@ -193,7 +236,7 @@ ${baseStyle}`
     else if (lowercaseContent.includes('misterio')) mood = 'atmósfera misteriosa pero segura';
     else if (lowercaseContent.includes('amistad')) mood = 'ambiente cálido de amistad';
     
-    return { character, setting, mood };
+    return { character, setting, mood, characterCount };
   }
 
   /**
