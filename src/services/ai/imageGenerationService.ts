@@ -27,7 +27,7 @@ interface ImageGenerationResult {
  */
 export class ImageGenerationService {
   private static readonly MODEL = 'gpt-image-1';
-  private static readonly SIZE = '1024x1536' as const; // portrait, supported by OpenAI
+  private static readonly SIZE = '1024x1792' as const; // portrait-friendly size supported by OpenAI
   private static readonly QUALITY = 'medium' as const;
 
   /**

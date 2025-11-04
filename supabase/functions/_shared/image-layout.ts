@@ -30,8 +30,8 @@ const GEMINI_ASPECT_RATIO_PRIORITY: GeminiAspectRatio[] = [
 ];
 
 export const OPENAI_LEGACY_SIZES: Record<string, string> = {
-  '4:5': '1024x1536',
-  '3:4': '1024x1536',
+  '4:5': '1024x1792',
+  '3:4': '1024x1792',
   '1:1': '1024x1024',
   '9:16': '1024x1792',
   '16:9': '1792x1024',

@@ -49,12 +49,12 @@ En desarrollo local, copia `.env.example` como `.env` y completa los valores. As
 - La iniciativa “Nano Banana” fija `aspectRatio: "4:5"` como preferencia para cualquier solicitud a Gemini. Esta proporción produce imágenes verticales ideales para portadas y escenas de los cuentos.
 - Gemini 2.5 Flash Image expone únicamente los ratios: `1:1`, `3:4`, `4:3`, `9:16` y `16:9`. Cuando `"4:5"` no esté disponible en la API, degradamos automáticamente al valor más cercano (`"3:4"`) manteniendo un lienzo vertical.
 - La resolución real que devuelve Gemini ronda los ~896×1152 px para escenas verticales. Registramos la resolución exacta en runtime para conservar metadatos coherentes.
-- Para el fallback de OpenAI mantenemos la tabla heredada de tamaños (`1024x1536`, `1024x1024`, `1792x1024`) y reutilizamos el helper compartido `mapAspectRatio` + `getImageLayout()` para normalizar al lienzo A4.
+- Para el fallback de OpenAI mantenemos la tabla heredada de tamaños (`1024x1792`, `1024x1024`, `1792x1024`) y reutilizamos el helper compartido `mapAspectRatio` + `getImageLayout()` para normalizar al lienzo A4.
 
 | Ratio solicitado | Ratio Gemini efectivo | Tamaño OpenAI de fallback | Observaciones |
 |------------------|-----------------------|---------------------------|---------------|
-| `4:5` (preferido) | `3:4`                 | `1024x1536`               | Vertical, mantiene narrativa de portada/escena. |
-| `3:4`             | `3:4`                 | `1024x1536`               | Coincide con el fallback principal. |
+| `4:5` (preferido) | `3:4`                 | `1024x1792`               | Vertical, mantiene narrativa de portada/escena. |
+| `3:4`             | `3:4`                 | `1024x1792`               | Coincide con el fallback principal. |
 | `1:1`             | `1:1`                 | `1024x1024`               | Usar sólo para assets cuadrados especiales. |
 | `9:16`            | `9:16`                | `1024x1792`               | Escenas ultra-verticales (no preferidas). |
 | `4:3` / `16:9`    | `4:3` / `16:9`        | `1792x1024`               | Mantener horizontal para material secundario. |

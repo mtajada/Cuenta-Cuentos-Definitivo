@@ -23450,7 +23450,7 @@ src/services/ai/imageGenerationService.ts
 172 |         prompt: prompt,
 173 |         n: 1,
 174 |         quality: "medium",
-175 |         size: "1024x1536",
+175 |         size: "1024x1792",
 176 |         background: "opaque"
 177 |       });
 178 | 

@@ -7,7 +7,7 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
 ## Checklist global
 
 - [ ] Completar Fase 0 – Preparativos
-- [ ] Completar Fase 1 – Backend (Supabase Edge)
+- [x] Completar Fase 1 – Backend (Supabase Edge)
 - [ ] Completar Fase 2 – Frontend
 - [ ] Completar Fase 3 – Persistencia y limpieza
 - [ ] Completar Fase 4 – QA y despliegue
@@ -18,7 +18,7 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
 
 - [ ] Confirmar que el frontend mantiene el orden vigente (`cover → escenas`) e invoca `character` únicamente cuando `story.scenes.character` existe, asegurando que cada solicitud especifique el ratio deseado.
 - [ ] Verificar que `generate-image` intenta Gemini con el ratio más cercano a 4:5 permitido por la API (vía helper) y aplica normalización a lienzo A4 mediante librería compatible con Deno.
-- [ ] Asegurar que ante fallo técnico se ejecuta fallback OpenAI con `1024x1536` y se normaliza igual que Gemini.
+- [ ] Asegurar que ante fallo técnico se ejecuta fallback OpenAI con `1024x1792` y se normaliza igual que Gemini.
 - [ ] Validar que el resultado siempre se sube a `images-stories` con metadatos completos y el frontend consume únicamente URLs públicas para construir el PDF alternando texto/imágenes.
 
 ---
@@ -32,7 +32,7 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
 - [x] Normalizar ratios y helper de layout
   - [x] Documentar preferencia por el lienzo 4:5, listar los `aspectRatio` realmente soportados por Gemini (`1:1`, `3:4`, `4:3`, `9:16`, etc.) y mantener una tabla de mapeo para degradar a la opción más cercana cuando `'4:5'` no esté disponible.
   - [x] Implementar helper compartido (`mapAspectRatio`) en `_shared/image-layout.ts` y reutilizarlo en frontend (`src/lib/image-layout.ts`) para traducir el ratio deseado al permitido.
-  - [x] Mantener tabla de tamaños heredados para OpenAI (`1024x1536`, etc.) como fallback.
+  - [x] Mantener tabla de tamaños heredados para OpenAI (`1024x1792`, etc.) como fallback.
   - [x] Centralizar la definición del layout en `supabase/functions/_shared/image-layout.ts` (export común) y generar automáticamente la contraparte `src/lib/image-layout.ts` usando el mismo contenido para preservar los imports actuales (`@/` en frontend, rutas relativas en Edge Functions).
 - [x] Validar dependencias compatibles con Deno
   - [x] Seleccionar librería WASM (`imagescript@1.3.0` desde `deno.land/x`) para redimensionado/centrado.
@@ -44,23 +44,23 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
 
 ### 1.1 `supabase/functions/generate-image`
 
-- [ ] Crear módulo `providers.ts`
-  - [ ] Implementar `generateWithGemini(config)` que reciba `prompt`, `aspectRatio` soportado (según helper), tiempos de espera y devuelva `{ buffer, mimeType, provider: 'gemini', finishReason, latencyMs }`.
-  - [ ] Reutilizar el helper `mapAspectRatio` para garantizar que siempre se envíe un valor permitido por Gemini y loggear el ratio final usado.
-  - [ ] Reusar/ajustar `generateWithOpenAI(...)` para solicitar `1024x1536` (u otro tamaño heredado) cuando se active el fallback.
-- [ ] Implementar `normalizeForLayout(buffer, mimeType)`
-  - [ ] Abrir imagen con `imagescript`, obtener `width`/`height` reales y, si hace falta, escalar proporcionalmente hasta que la dimensión mayor alcance el objetivo manteniendo el aspecto.
-  - [ ] Componer lienzo A4 parametrizable (defecto 1654×2339 px @200 dpi) centrando la ilustración sin deformarla; exportar como JPEG verificando si la librería elimina EXIF y, de no ser así, limpiando metadatos manualmente.
-  - [ ] Añadir relleno controlado cuando el ratio obtenido no sea 4:5 para que el frontend decida si lo mantiene o aplica recorte adicional.
-  - [ ] Registrar `originalResolution` usando `width × height` reales y calcular `resizedFrom`, `resizedTo` tras escalar proporcionalmente.
-- [ ] Actualizar flujo principal de `generate-image`
-  - [ ] Leer de la petición `desiredAspectRatio` (default `'4:5'`), mapearlo mediante helper a un `aspectRatio` permitido por Gemini y pasarlo en `imageConfig`.
-  - [ ] Invocar Gemini con `responseModalities: ['Image']` y el `aspectRatio` derivado.
-  - [ ] Validar presencia de `candidates[0].content.parts[].inlineData`; si falta, registrar `EMPTY_IMAGE` y activar fallback técnico.
-  - [ ] Procesar siempre la imagen con `normalizeForLayout`, convirtiendo `inlineData.data` (base64) a `Uint8Array` antes de pasarla a la librería de imágenes.
-  - [ ] Ejecutar fallback con OpenAI sólo ante errores técnicos (timeout, 5xx, respuesta vacía); nunca por `finishReason === 'SAFETY'`.
-  - [ ] Registrar en `public.story_images` los metadatos finales (incluyendo `user_id`, `provider`, `fallback_used`, resoluciones y `latencyMs`) antes de devolver la respuesta, reutilizando el `storyId/chapterId/imageType` ya existente.
-- [ ] Subir la imagen normalizada a `images-stories` (usando Fase 1.2) y devolver una respuesta JSON consistente:
+- [x] Crear módulo `providers.ts`
+  - [x] Implementar `generateWithGemini(config)` que reciba `prompt`, `aspectRatio` soportado (según helper), tiempos de espera y devuelva `{ buffer, mimeType, provider: 'gemini', finishReason, latencyMs }`.
+  - [x] Reutilizar el helper `mapAspectRatio` para garantizar que siempre se envíe un valor permitido por Gemini y loggear el ratio final usado.
+  - [x] Reusar/ajustar `generateWithOpenAI(...)` para solicitar `1024x1792` (u otro tamaño heredado) cuando se active el fallback.
+- [x] Implementar `normalizeForLayout(buffer, mimeType)`
+  - [x] Abrir imagen con `imagescript`, obtener `width`/`height` reales y, si hace falta, escalar proporcionalmente hasta que la dimensión mayor alcance el objetivo manteniendo el aspecto.
+  - [x] Componer lienzo A4 parametrizable (defecto 1654×2339 px @200 dpi) centrando la ilustración sin deformarla; exportar como JPEG verificando si la librería elimina EXIF y, de no ser así, limpiando metadatos manualmente.
+  - [x] Añadir relleno controlado cuando el ratio obtenido no sea 4:5 para que el frontend decida si lo mantiene o aplica recorte adicional.
+  - [x] Registrar `originalResolution` usando `width × height` reales y calcular `resizedFrom`, `resizedTo` tras escalar proporcionalmente.
+- [x] Actualizar flujo principal de `generate-image`
+  - [x] Leer de la petición `desiredAspectRatio` (default `'4:5'`), mapearlo mediante helper a un `aspectRatio` permitido por Gemini y pasarlo en `imageConfig`.
+  - [x] Invocar Gemini con `responseModalities: ['Image']` y el `aspectRatio` derivado.
+  - [x] Validar presencia de `candidates[0].content.parts[].inlineData`; si falta, registrar `EMPTY_IMAGE` y activar fallback técnico.
+  - [x] Procesar siempre la imagen con `normalizeForLayout`, convirtiendo `inlineData.data` (base64) a `Uint8Array` antes de pasarla a la librería de imágenes.
+  - [x] Ejecutar fallback con OpenAI sólo ante errores técnicos (timeout, 5xx, respuesta vacía); nunca por `finishReason === 'SAFETY'`.
+  - [x] Registrar en `public.story_images` los metadatos finales (incluyendo `user_id`, `provider`, `fallback_used`, resoluciones y `latencyMs`) antes de devolver la respuesta, reutilizando el `storyId/chapterId/imageType` ya existente.
+- [x] Subir la imagen normalizada a `images-stories` (usando Fase 1.2) y devolver una respuesta JSON consistente:
   ```json
   {
     "success": true,
@@ -76,20 +76,20 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
     }
   }
   ```
-  - [ ] Mantener `imageBase64` en la respuesta sólo cuando la subida falle, replicando la lógica que hoy usan los clientes con OpenAI.
+  - [x] Mantener `imageBase64` en la respuesta sólo cuando la subida falle, replicando la lógica que hoy usan los clientes con OpenAI.
 
 ### 1.2 `supabase/functions/upload-story-image`
 
-- [ ] Recibir `imageBase64` + `mimeType` como camino principal (para la normalización), manteniendo compatibilidad con `imageUrl` tal como opera el flujo de OpenAI.
-- [ ] Soportar `chapterId` opcional
-  - [ ] Guardar `images-stories/<storyId>/character.<ext>` cuando falte `chapterId`.
-  - [ ] Mantener `images-stories/<storyId>/<chapterId>/<imageType>.<ext>` cuando exista.
-- [ ] Ajustar `contentType` al `mimeType` recibido y habilitar `upsert: true`.
-- [ ] Incluir en la respuesta `publicUrl`, `storagePath`, `mimeType`, `providerUsed`.
+- [x] Recibir `imageBase64` + `mimeType` como camino principal (para la normalización), manteniendo compatibilidad con `imageUrl` tal como opera el flujo de OpenAI.
+- [x] Soportar `chapterId` opcional
+  - [x] Guardar `images-stories/<storyId>/character.<ext>` cuando falte `chapterId`.
+  - [x] Mantener `images-stories/<storyId>/<chapterId>/<imageType>.<ext>` cuando exista.
+- [x] Ajustar `contentType` al `mimeType` recibido y habilitar `upsert: true`.
+- [x] Incluir en la respuesta `publicUrl`, `storagePath`, `mimeType`, `providerUsed`.
 
 ### 1.3 Metadatos
 
-- [ ] Crear tabla `public.story_images` con el siguiente esquema:
+- [x] Crear tabla `public.story_images` con el siguiente esquema:
   ```sql
   id uuid default uuid_generate_v4() primary key,
   story_id uuid not null,
@@ -107,14 +107,14 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
   user_id uuid not null,
   created_at timestamptz default now()
   ```
-- [ ] Crear índice único que garantice una fila por imagen:
+- [x] Crear índice único que garantice una fila por imagen:
   ```sql
   create unique index uniq_story_images
   on public.story_images (story_id, coalesce(chapter_id, '00000000-0000-0000-0000-000000000000'::uuid), image_type);
   ```
-- [ ] Añadir políticas RLS
-  - [ ] Permitir `select` únicamente a usuarios propietarios de la historia mediante verificación directa de `user_id` o `exists` sobre `stories`.
-  - [ ] Autorizar `insert/update` a Edge Functions (`service_role`).
+- [x] Añadir políticas RLS
+  - [x] Permitir `select` únicamente a usuarios propietarios de la historia mediante verificación directa de `user_id` o `exists` sobre `stories`.
+  - [x] Autorizar `insert/update` a Edge Functions (`service_role`).
 
 ---
 
