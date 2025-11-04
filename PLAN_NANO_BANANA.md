@@ -16,8 +16,8 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
 
 ## Flujo general
 
-- [ ] Confirmar que el frontend genera solicitudes en orden `character → cover → escenas` usando formato 4:5.
-- [ ] Verificar que `generate-image` intenta Gemini con `aspectRatio: "4:5"` y aplica normalización a lienzo A4 mediante librería compatible con Deno.
+- [ ] Confirmar que el frontend mantiene el orden vigente (`cover → escenas`) e invoca `character` únicamente cuando `story.scenes.character` existe, asegurando que cada solicitud especifique el ratio deseado.
+- [ ] Verificar que `generate-image` intenta Gemini con el ratio más cercano a 4:5 permitido por la API (vía helper) y aplica normalización a lienzo A4 mediante librería compatible con Deno.
 - [ ] Asegurar que ante fallo técnico se ejecuta fallback OpenAI con `1024x1536` y se normaliza igual que Gemini.
 - [ ] Validar que el resultado siempre se sube a `images-stories` con metadatos completos y el frontend consume únicamente URLs públicas para construir el PDF alternando texto/imágenes.
 
@@ -27,14 +27,15 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
 
 - [ ] Configurar variables de entorno
   - [ ] Registrar `GEMINI_API_KEY` y `OPENAI_API_KEY` en todos los entornos.
-  - [ ] Definir `IMAGE_PROVIDER_DEFAULT=gemini` y `IMAGE_PROVIDER_FALLBACK=openai` (Edge + frontend).
-  - [ ] Actualizar `.env.example` y `docs/EDGE_FUNCTIONS.md`.
+  - [ ] Definir `IMAGE_PROVIDER_DEFAULT=gemini` y `IMAGE_PROVIDER_FALLBACK=openai` para las Edge Functions, y exponer `VITE_IMAGE_PROVIDER_DEFAULT` / `VITE_IMAGE_PROVIDER_FALLBACK` en el frontend.
+  - [ ] Documentar las nuevas variables en `docs/EDGE_FUNCTIONS.md` y en el archivo de ejemplo de entorno que se comparta con el equipo.
 - [ ] Normalizar ratios y helper de layout
-  - [ ] Documentar uso exclusivo de `aspectRatio: "4:5"` (896×1152) para Gemini.
+  - [ ] Documentar preferencia por el lienzo 4:5, listar los `aspectRatio` realmente soportados por Gemini (`1:1`, `3:4`, `4:3`, `9:16`, etc.) y mantener una tabla de mapeo para degradar a la opción más cercana cuando `'4:5'` no esté disponible.
+  - [ ] Implementar helper compartido (`mapAspectRatio`) en `_shared/image-layout.ts` y reutilizarlo en frontend (`src/lib/image-layout.ts`) para traducir el ratio deseado al permitido.
   - [ ] Mantener tabla de tamaños heredados para OpenAI (`1024x1536`, etc.) como fallback.
-  - [ ] Implementar helper compartido `getImageLayout()` con ratio 4:5, resolución mínima y márgenes para A4.
+  - [ ] Centralizar la definición del layout en `supabase/functions/_shared/image-layout.ts` (export común) y generar automáticamente la contraparte `src/lib/image-layout.ts` usando el mismo contenido para preservar los imports actuales (`@/` en frontend, rutas relativas en Edge Functions).
 - [ ] Validar dependencias compatibles con Deno
-  - [ ] Seleccionar librería WASM (`imagescript@^1.4` o equivalente) para redimensionado/centrado.
+  - [ ] Seleccionar librería WASM (`imagescript@1.3.0` desde `deno.land/x`) para redimensionado/centrado.
   - [ ] Documentar en `docs/EDGE_FUNCTIONS.md` la prohibición de librerías Node nativas (`sharp`, `jimp`) y detallar uso de la librería elegida.
 
 ---
@@ -44,17 +45,21 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
 ### 1.1 `supabase/functions/generate-image`
 
 - [ ] Crear módulo `providers.ts`
-  - [ ] Implementar `generateWithGemini(...)` que devuelva `{ buffer, mimeType, provider: 'gemini', finishReason, latencyMs }`.
+  - [ ] Implementar `generateWithGemini(config)` que reciba `prompt`, `aspectRatio` soportado (según helper), tiempos de espera y devuelva `{ buffer, mimeType, provider: 'gemini', finishReason, latencyMs }`.
+  - [ ] Reutilizar el helper `mapAspectRatio` para garantizar que siempre se envíe un valor permitido por Gemini y loggear el ratio final usado.
   - [ ] Reusar/ajustar `generateWithOpenAI(...)` para solicitar `1024x1536` (u otro tamaño heredado) cuando se active el fallback.
 - [ ] Implementar `normalizeForLayout(buffer, mimeType)`
-  - [ ] Abrir imagen con `imagescript` y escalar a 896×1152 si fuera necesario sin alterar el ratio.
-  - [ ] Componer lienzo A4 (2480×3508 px a 300 dpi) centrando la ilustración y exportar (JPEG/PNG) manteniendo metadatos.
-  - [ ] Registrar `originalResolution`, `finalResolution`, `resizedFrom`, `resizedTo`.
+  - [ ] Abrir imagen con `imagescript`, obtener `width`/`height` reales y, si hace falta, escalar proporcionalmente hasta que la dimensión mayor alcance el objetivo manteniendo el aspecto.
+  - [ ] Componer lienzo A4 parametrizable (defecto 1654×2339 px @200 dpi) centrando la ilustración sin deformarla; exportar como JPEG verificando si la librería elimina EXIF y, de no ser así, limpiando metadatos manualmente.
+  - [ ] Añadir relleno controlado cuando el ratio obtenido no sea 4:5 para que el frontend decida si lo mantiene o aplica recorte adicional.
+  - [ ] Registrar `originalResolution` usando `width × height` reales y calcular `resizedFrom`, `resizedTo` tras escalar proporcionalmente.
 - [ ] Actualizar flujo principal de `generate-image`
-  - [ ] Invocar Gemini con `aspectRatio: "4:5"` y `responseModalities: ['IMAGE']`.
-  - [ ] Validar presencia de `inline_data`; si falta, registrar `EMPTY_IMAGE` y activar fallback técnico.
-  - [ ] Procesar siempre la imagen con `normalizeForLayout`.
+  - [ ] Leer de la petición `desiredAspectRatio` (default `'4:5'`), mapearlo mediante helper a un `aspectRatio` permitido por Gemini y pasarlo en `imageConfig`.
+  - [ ] Invocar Gemini con `responseModalities: ['Image']` y el `aspectRatio` derivado.
+  - [ ] Validar presencia de `candidates[0].content.parts[].inlineData`; si falta, registrar `EMPTY_IMAGE` y activar fallback técnico.
+  - [ ] Procesar siempre la imagen con `normalizeForLayout`, convirtiendo `inlineData.data` (base64) a `Uint8Array` antes de pasarla a la librería de imágenes.
   - [ ] Ejecutar fallback con OpenAI sólo ante errores técnicos (timeout, 5xx, respuesta vacía); nunca por `finishReason === 'SAFETY'`.
+  - [ ] Registrar en `public.story_images` los metadatos finales (incluyendo `user_id`, `provider`, `fallback_used`, resoluciones y `latencyMs`) antes de devolver la respuesta, reutilizando el `storyId/chapterId/imageType` ya existente.
 - [ ] Subir la imagen normalizada a `images-stories` (usando Fase 1.2) y devolver una respuesta JSON consistente:
   ```json
   {
@@ -64,30 +69,33 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
       "providerUsed": "gemini",
       "fallbackUsed": false,
       "latencyMs": 1234,
-      "originalResolution": "896x1152",
-      "finalResolution": "A4@300dpi",
-      "resizedFrom": "896x1152",
-      "resizedTo": "2480x3508"
+      "originalResolution": "providerWidthxproviderHeight",
+      "finalResolution": "A4@200dpi",
+      "resizedFrom": "providerWidthxproviderHeight",
+      "resizedTo": "1654x2339"
     }
   }
   ```
+  - [ ] Mantener `imageBase64` en la respuesta sólo cuando la subida falle, replicando la lógica que hoy usan los clientes con OpenAI.
 
 ### 1.2 `supabase/functions/upload-story-image`
 
-- [ ] Forzar uso de `imageBase64` + `mimeType` como entrada obligatoria.
+- [ ] Recibir `imageBase64` + `mimeType` como camino principal (para la normalización), manteniendo compatibilidad con `imageUrl` tal como opera el flujo de OpenAI.
 - [ ] Soportar `chapterId` opcional
   - [ ] Guardar `images-stories/<storyId>/character.<ext>` cuando falte `chapterId`.
   - [ ] Mantener `images-stories/<storyId>/<chapterId>/<imageType>.<ext>` cuando exista.
 - [ ] Ajustar `contentType` al `mimeType` recibido y habilitar `upsert: true`.
-- [ ] Incluir en la respuesta `publicUrl`, `path`, `mimeType`, `providerUsed`.
+- [ ] Incluir en la respuesta `publicUrl`, `storagePath`, `mimeType`, `providerUsed`.
 
 ### 1.3 Metadatos
 
 - [ ] Crear tabla `public.story_images` con el siguiente esquema:
   ```sql
+  id uuid default uuid_generate_v4() primary key,
   story_id uuid not null,
   chapter_id uuid null,
   image_type text not null,
+  storage_path text not null,
   provider text not null,
   fallback_used boolean not null default false,
   mime_type text not null,
@@ -96,11 +104,16 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
   resized_from text,
   resized_to text,
   latency_ms integer,
-  created_at timestamptz default now(),
-  primary key (story_id, coalesce(chapter_id, uuid_nil()), image_type)
+  user_id uuid not null,
+  created_at timestamptz default now()
+  ```
+- [ ] Crear índice único que garantice una fila por imagen:
+  ```sql
+  create unique index uniq_story_images
+  on public.story_images (story_id, coalesce(chapter_id, '00000000-0000-0000-0000-000000000000'::uuid), image_type);
   ```
 - [ ] Añadir políticas RLS
-  - [ ] Permitir `select` únicamente a usuarios propietarios de la historia.
+  - [ ] Permitir `select` únicamente a usuarios propietarios de la historia mediante verificación directa de `user_id` o `exists` sobre `stories`.
   - [ ] Autorizar `insert/update` a Edge Functions (`service_role`).
 
 ---
@@ -109,7 +122,7 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
 
 ### 2.1 `src/services/ai/imageGenerationService.ts`
 
-- [ ] Sustituir la constante `MODEL` por lectura dinámica de `getDefaultImageProvider()`.
+- [ ] Sustituir la constante `MODEL` por lectura dinámica de un helper (`getImageProviderConfig`) que resuelva `model`, tamaños y rutas a partir de `VITE_IMAGE_PROVIDER_DEFAULT` / `VITE_IMAGE_PROVIDER_FALLBACK`.
 - [ ] Ajustar payload hacia Edge Function para incluir:
   ```ts
   {
@@ -117,39 +130,39 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
     storyId,
     chapterId,
     imageType,
-    desiredAspectRatio: '4:5',
-    includeBase64: false
+    desiredAspectRatio: '4:5'
   }
   ```
-- [ ] Persistir únicamente `publicUrl` en el array de resultados.
-- [ ] Mantener orden de generación `character → cover → scene_1..closing`.
-- [ ] Limitar concurrencia a 2 peticiones simultáneas.
-- [ ] Propagar a la UI `providerUsed`, `fallbackUsed`, `latencyMs`, `resizedFrom`, `resizedTo`.
+  - [ ] Usar el helper compartido `mapAspectRatio` para mostrar en logs/UI tanto el ratio solicitado como el efectivo que la API aceptó.
+- [ ] Mantener la estructura de respuesta actual (`imageBase64` opcional + `publicUrl`) para garantizar compatibilidad con los consumidores existentes cuando la subida falle.
+- [ ] Mantener orden de generación `cover → scene_1..closing` y añadir generación de `character` únicamente si `scenes.character` está presente, usando la misma cola concurrente (máximo 3) ya codificada.
+- [ ] Propagar a la UI `providerUsed`, `fallbackUsed`, `latencyMs`, `resizedFrom`, `resizedTo`, junto con `storagePath` para reconciliar metadatos.
 
 ### 2.2 `src/services/storyPdfService.ts`
 
 - [ ] Actualizar `validateRequiredImages` para aceptar `.jpeg` y `.png`.
-- [ ] Consultar `story_images` para obtener metadatos evitando HEAD extras.
-- [ ] Generar PDF insertando cada imagen centrada en página A4 completa.
+  - [ ] Consultar `story_images` para obtener metadatos, reutilizar `storage_path` para armar la URL pública con `getPublicUrl` y evitar HEAD extras, mostrando proveedor y resolución al usuario.
+  - [ ] Generar PDF insertando cada imagen centrada en página A4 completa, reutilizando la información de layout compartida.
 - [ ] Alternar páginas `texto → imagen → texto → imagen` en todo el documento.
 
 ### 2.3 Simple toggles
 
-- [ ] Leer proveedor activo desde variables (`IMAGE_PROVIDER_DEFAULT`, `IMAGE_PROVIDER_FALLBACK`) y exponerlo en la UI.
-- [ ] Mostrar en `AdminIllustratedPdfPanel` el proveedor activo leyendo `import.meta.env`.
+- [ ] Leer proveedor activo desde `VITE_IMAGE_PROVIDER_DEFAULT` / `VITE_IMAGE_PROVIDER_FALLBACK` y exponerlo en la UI.
+- [ ] Mostrar en `AdminIllustratedPdfPanel` el proveedor activo y los últimos metadatos generados leyendo `import.meta.env`.
 
 ---
 
 ## Fase 3 – Persistencia y limpieza
 
 - [ ] Ejecutar backfill en `images-stories`
-  - [ ] Normalizar extensiones existentes a `.jpeg`.
-  - [ ] Registrar metadatos (`mimeType`, `originalResolution`, `finalResolution`) para ilustraciones históricas.
+  - [ ] Reconvertir las imágenes existentes en `story-images` a JPEG mediante la misma rutina de normalización antes de moverlas y renombrarlas a `.jpeg`.
+  - [ ] Registrar metadatos (`mimeType`, `originalResolution`, `finalResolution`, `storagePath`) para ilustraciones históricas.
+  - [ ] Actualizar la Edge Function `generate-illustrated-pdf` y cualquier script que lea `story-images/*.png` para que utilicen `images-stories` y las nuevas rutas `.jpeg` antes del backfill.
 - [ ] Actualizar documentación clave
   - [ ] Revisar `docs/ADMIN_ILLUSTRATED_PDF_PANEL.md` incorporando nuevo flujo y métricas.
-  - [ ] Actualizar `docs/EDGE_FUNCTIONS.md` con pipeline 4:5 y la librería de normalización.
+  - [ ] Actualizar `docs/EDGE_FUNCTIONS.md` detallando el pipeline Gemini→normalización→OpenAI fallback, la librería de normalización elegida y la estructura de metadatos almacenados.
 - [ ] Depurar referencias legacy
-  - [ ] Reemplazar cualquier uso del bucket `story-images` por `images-stories`.
+  - [ ] Reemplazar cualquier uso del bucket `story-images` por `images-stories` (incluyendo `generate-illustrated-pdf` y scripts asociados).
   - [ ] Eliminar flujos que descargaban imágenes desde el frontend en lugar de usar URLs públicas normalizadas.
 
 ---
