@@ -122,8 +122,8 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
 
 ### 2.1 `src/services/ai/imageGenerationService.ts`
 
-- [ ] Sustituir la constante `MODEL` por lectura dinámica de un helper (`getImageProviderConfig`) que resuelva `model`, tamaños y rutas a partir de `VITE_IMAGE_PROVIDER_DEFAULT` / `VITE_IMAGE_PROVIDER_FALLBACK`.
-- [ ] Ajustar payload hacia Edge Function para incluir:
+- [x] Sustituir la constante `MODEL` por lectura dinámica de un helper (`getImageProviderConfig`) que resuelva `model`, tamaños y rutas a partir de `VITE_IMAGE_PROVIDER_DEFAULT` / `VITE_IMAGE_PROVIDER_FALLBACK`.
+- [x] Ajustar payload hacia Edge Function para incluir:
   ```ts
   {
     prompt,
@@ -133,22 +133,22 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
     desiredAspectRatio: '4:5'
   }
   ```
-  - [ ] Usar el helper compartido `mapAspectRatio` para mostrar en logs/UI tanto el ratio solicitado como el efectivo que la API aceptó.
-- [ ] Mantener la estructura de respuesta actual (`imageBase64` opcional + `publicUrl`) para garantizar compatibilidad con los consumidores existentes cuando la subida falle.
-- [ ] Mantener orden de generación `cover → scene_1..closing` y añadir generación de `character` únicamente si `scenes.character` está presente, usando la misma cola concurrente (máximo 3) ya codificada.
-- [ ] Propagar a la UI `providerUsed`, `fallbackUsed`, `latencyMs`, `resizedFrom`, `resizedTo`, junto con `storagePath` para reconciliar metadatos.
+  - [x] Usar el helper compartido `mapAspectRatio` para mostrar en logs/UI tanto el ratio solicitado como el efectivo que la API aceptó.
+- [x] Mantener la estructura de respuesta actual (`imageBase64` opcional + `publicUrl`) para garantizar compatibilidad con los consumidores existentes cuando la subida falle.
+- [x] Mantener orden de generación `cover → scene_1..closing` y añadir generación de `character` únicamente si `scenes.character` está presente, usando la misma cola concurrente (máximo 3) ya codificada.
+- [x] Propagar a la UI `providerUsed`, `fallbackUsed`, `latencyMs`, `resizedFrom`, `resizedTo`, junto con `storagePath` para reconciliar metadatos.
 
 ### 2.2 `src/services/storyPdfService.ts`
 
-- [ ] Actualizar `validateRequiredImages` para aceptar `.jpeg` y `.png`.
-  - [ ] Consultar `story_images` para obtener metadatos, reutilizar `storage_path` para armar la URL pública con `getPublicUrl` y evitar HEAD extras, mostrando proveedor y resolución al usuario.
-  - [ ] Generar PDF insertando cada imagen centrada en página A4 completa, reutilizando la información de layout compartida.
-- [ ] Alternar páginas `texto → imagen → texto → imagen` en todo el documento.
+- [x] Actualizar `validateRequiredImages` para aceptar `.jpeg` y `.png`.
+  - [x] Consultar `story_images` para obtener metadatos, reutilizar `storage_path` para armar la URL pública con `getPublicUrl` y evitar HEAD extras, mostrando proveedor y resolución al usuario.
+  - [x] Generar PDF insertando cada imagen centrada en página A4 completa, reutilizando la información de layout compartida.
+- [x] Alternar páginas `texto → imagen → texto → imagen` en todo el documento.
 
 ### 2.3 Simple toggles
 
-- [ ] Leer proveedor activo desde `VITE_IMAGE_PROVIDER_DEFAULT` / `VITE_IMAGE_PROVIDER_FALLBACK` y exponerlo en la UI.
-- [ ] Mostrar en `AdminIllustratedPdfPanel` el proveedor activo y los últimos metadatos generados leyendo `import.meta.env`.
+- [x] Leer proveedor activo desde `VITE_IMAGE_PROVIDER_DEFAULT` / `VITE_IMAGE_PROVIDER_FALLBACK` y exponerlo en la UI.
+- [x] Mostrar en `AdminIllustratedPdfPanel` el proveedor activo y los últimos metadatos generados leyendo `import.meta.env`.
 
 ---
 

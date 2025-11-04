@@ -1,9 +1,39 @@
 import { supabase } from '../supabaseClient';
 import { IMAGES_TYPE } from '../constants/story-images.constant';
 import { PdfService } from './pdfService';
-import { ImageGenerationService } from './ai/imageGenerationService';
+import { ImageGenerationService, GeneratedImageMetadata, ImageGenerationSummary } from './ai/imageGenerationService';
 import jsPDF from 'jspdf';
 import { APP_CONFIG } from '../config/app';
+import { getImageLayout } from '@/lib/image-layout';
+
+export interface StoryImageValidationDetail extends GeneratedImageMetadata {
+  publicUrl: string;
+}
+
+interface StoryImageMetadataRecord {
+  image_type: string;
+  storage_path: string | null;
+  provider: string | null;
+  fallback_used: boolean | null;
+  mime_type: string | null;
+  original_resolution: string | null;
+  final_resolution: string | null;
+  resized_from: string | null;
+  resized_to: string | null;
+  latency_ms: number | null;
+  chapter_id: string | null;
+}
+
+interface FetchImageMetadataOptions {
+  storyId: string;
+  chapterId?: string;
+  imageTypes: string[];
+  adminCode?: string;
+}
+
+interface ValidateImagesOptions {
+  adminCode?: string;
+}
 
 interface ImageValidationResult {
   cover: boolean;
@@ -22,6 +52,7 @@ interface ImageValidationResult {
     scene_4?: string;
     closing?: string;
   };
+  imageDetails?: Record<string, StoryImageValidationDetail>;
 }
 
 interface StoryPdfGenerationOptions {
@@ -72,6 +103,7 @@ interface CompleteIllustratedPdfOptions extends StoryPdfGenerationOptions {
 export class StoryPdfService {
   private static readonly REQUIRED_IMAGES = [IMAGES_TYPE.COVER, IMAGES_TYPE.SCENE_1, IMAGES_TYPE.SCENE_2, IMAGES_TYPE.SCENE_3, IMAGES_TYPE.SCENE_4, IMAGES_TYPE.CLOSING];
   private static readonly IMAGE_BUCKET = 'images-stories';
+  private static readonly LEGACY_IMAGE_EXTENSIONS = ['jpeg', 'jpg', 'png', 'webp'];
   
   // TEMPORARY: Development mode to use local preview images
   // TODO: Set to false when ready for production
@@ -85,8 +117,12 @@ export class StoryPdfService {
    * @param storyId Story identifier
    * @param chapterId Chapter identifier
    * @returns Promise with validation results and image URLs if available
-   */
-  static async validateRequiredImages(storyId: string, chapterId: string): Promise<ImageValidationResult> {
+  */
+  static async validateRequiredImages(
+    storyId: string,
+    chapterId: string,
+    options: ValidateImagesOptions = {}
+  ): Promise<ImageValidationResult> {
 
     const validationResult: ImageValidationResult = {
       cover: false,
@@ -97,45 +133,126 @@ export class StoryPdfService {
       closing: false,
       allValid: false,
       missingImages: [],
-      imageUrls: {}
+      imageUrls: {},
+      imageDetails: {}
     };
 
     try {
       console.log('[StoryPdfService] Validating images for story:', storyId, 'chapter:', chapterId);
 
-      for (const imageType of this.REQUIRED_IMAGES) {
-        const imagePath = `${storyId}/${chapterId}/${imageType}.jpeg`;
-        
-        // Get public URL from Supabase storage
-        const { data } = supabase.storage
-          .from(this.IMAGE_BUCKET)
-          .getPublicUrl(imagePath);
+      const normalizedChapterId = typeof chapterId === 'string' && chapterId.trim().length > 0 ? chapterId.trim() : undefined;
+      const records = await this.fetchImageMetadata({
+        storyId,
+        chapterId: normalizedChapterId,
+        imageTypes: this.REQUIRED_IMAGES,
+        adminCode: options.adminCode,
+      });
+      const imageUrls: Record<string, string> = {};
+      const imageDetails: Record<string, StoryImageValidationDetail> = {};
 
-        if (data?.publicUrl) {
-          // Validate image accessibility with HTTP HEAD request
-          try {
-            const response = await fetch(data.publicUrl, { method: 'HEAD' });
-            if (response.ok) {
-              validationResult[imageType as keyof Omit<ImageValidationResult, 'allValid' | 'missingImages' | 'imageUrls'>] = true;
-              validationResult.imageUrls![imageType as keyof NonNullable<ImageValidationResult['imageUrls']>] = data.publicUrl;
-              console.log(`[StoryPdfService] ✅ Found ${imageType}: ${data.publicUrl}`);
-            } else {
-              console.log(`[StoryPdfService] ❌ Image ${imageType} not accessible:`, response.status);
-              validationResult.missingImages.push(this.getImageDisplayName(imageType));
-            }
-          } catch (fetchError) {
-            console.log(`[StoryPdfService] ❌ Error accessing ${imageType}:`, fetchError);
-            validationResult.missingImages.push(this.getImageDisplayName(imageType));
-          }
+      for (const imageType of this.REQUIRED_IMAGES) {
+        const exactMatch = records.find(
+          record => record.image_type === imageType && record.chapter_id === normalizedChapterId
+        );
+        const fallbackMatch = records.find(
+          record => record.image_type === imageType && record.chapter_id == null
+        );
+        const selectedRecord = exactMatch ?? fallbackMatch ?? null;
+
+        let detail: StoryImageValidationDetail | null = null;
+
+        if (!selectedRecord) {
+          console.log(`[StoryPdfService] ❌ No metadata for ${imageType}`);
+        } else if (!selectedRecord.storage_path) {
+          console.log(`[StoryPdfService] ❌ Metadata for ${imageType} is missing storage_path`);
         } else {
-          console.log(`[StoryPdfService] ❌ No public URL for ${imageType}`);
-          validationResult.missingImages.push(this.getImageDisplayName(imageType));
+          const { data: publicUrlData } = supabase.storage
+            .from(this.IMAGE_BUCKET)
+            .getPublicUrl(selectedRecord.storage_path);
+
+          const publicUrl = publicUrlData?.publicUrl;
+          if (!publicUrl) {
+            console.log(`[StoryPdfService] ❌ Unable to resolve public URL for ${imageType} using metadata path ${selectedRecord.storage_path}`);
+          } else {
+            let urlAvailable = false;
+            try {
+              const response = await fetch(publicUrl, { method: 'HEAD' });
+              if (response.ok) {
+                urlAvailable = true;
+              } else {
+                console.warn(
+                  `[StoryPdfService] ❌ HEAD check for ${imageType} at ${selectedRecord.storage_path} returned ${response.status}`
+                );
+              }
+            } catch (error) {
+              console.warn(
+                `[StoryPdfService] ❌ HEAD request failed for ${imageType} at ${selectedRecord.storage_path}`,
+                error
+              );
+            }
+
+            if (!urlAvailable) {
+              console.log(
+                `[StoryPdfService] ❌ Storage object unavailable for ${imageType} despite metadata entry ${selectedRecord.storage_path}`
+              );
+            } else {
+              detail = {
+                publicUrl,
+                providerUsed: (selectedRecord.provider ?? undefined) as GeneratedImageMetadata['providerUsed'],
+                fallbackUsed: Boolean(selectedRecord.fallback_used),
+                latencyMs: typeof selectedRecord.latency_ms === 'number' ? selectedRecord.latency_ms : undefined,
+                requestedAspectRatio: undefined,
+                effectiveAspectRatio: undefined,
+                requestSize: undefined,
+                originalResolution: selectedRecord.original_resolution ?? undefined,
+                finalResolution: selectedRecord.final_resolution ?? undefined,
+                resizedFrom: selectedRecord.resized_from ?? undefined,
+                resizedTo: selectedRecord.resized_to ?? undefined,
+                mimeType: selectedRecord.mime_type ?? undefined,
+                storagePath: selectedRecord.storage_path ?? undefined,
+                storyId,
+                chapterId: selectedRecord.chapter_id ?? undefined,
+                imageType,
+              };
+            }
+          }
         }
+
+        if (!detail) {
+          const legacyDetail = await this.tryLegacyStorageFallback(storyId, normalizedChapterId, imageType);
+          if (legacyDetail) {
+            detail = legacyDetail;
+          }
+        }
+
+        if (!detail) {
+          validationResult.missingImages.push(this.getImageDisplayName(imageType));
+          continue;
+        }
+
+        imageUrls[imageType] = detail.publicUrl;
+        imageDetails[imageType] = detail;
+        this.setImageValidationFlag(validationResult, imageType, true);
+
+        console.log(
+          `[StoryPdfService] ✅ ${imageType} via ${detail.providerUsed ?? 'desconocido'} | final=${detail.finalResolution ?? 'N/A'} original=${detail.originalResolution ?? 'N/A'}`
+        );
       }
 
-      validationResult.allValid = validationResult.cover && validationResult.scene_1 && validationResult.scene_2 && validationResult.scene_3 && validationResult.scene_4 && validationResult.closing;
+      const typedImageUrls: NonNullable<ImageValidationResult['imageUrls']> = {};
+      if (imageUrls[IMAGES_TYPE.COVER]) typedImageUrls.cover = imageUrls[IMAGES_TYPE.COVER];
+      if (imageUrls[IMAGES_TYPE.SCENE_1]) typedImageUrls.scene_1 = imageUrls[IMAGES_TYPE.SCENE_1];
+      if (imageUrls[IMAGES_TYPE.SCENE_2]) typedImageUrls.scene_2 = imageUrls[IMAGES_TYPE.SCENE_2];
+      if (imageUrls[IMAGES_TYPE.SCENE_3]) typedImageUrls.scene_3 = imageUrls[IMAGES_TYPE.SCENE_3];
+      if (imageUrls[IMAGES_TYPE.SCENE_4]) typedImageUrls.scene_4 = imageUrls[IMAGES_TYPE.SCENE_4];
+      if (imageUrls[IMAGES_TYPE.CLOSING]) typedImageUrls.closing = imageUrls[IMAGES_TYPE.CLOSING];
+
+      validationResult.imageUrls = Object.keys(typedImageUrls).length > 0 ? typedImageUrls : undefined;
+      validationResult.imageDetails = Object.keys(imageDetails).length > 0 ? imageDetails : undefined;
+
+      validationResult.allValid = this.REQUIRED_IMAGES.every(type => Boolean(imageDetails[type]));
       console.log('[StoryPdfService] Image validation results:', validationResult);
-      
+
       return validationResult;
     } catch (error) {
       console.error('[StoryPdfService] Error validating images:', error);
@@ -266,6 +383,172 @@ export class StoryPdfService {
     return displayNames[imageType] || imageType;
   }
 
+  private static setImageValidationFlag(result: ImageValidationResult, imageType: string, value: boolean): void {
+    if (imageType === IMAGES_TYPE.COVER) {
+      result.cover = value;
+    } else if (imageType === IMAGES_TYPE.SCENE_1) {
+      result.scene_1 = value;
+    } else if (imageType === IMAGES_TYPE.SCENE_2) {
+      result.scene_2 = value;
+    } else if (imageType === IMAGES_TYPE.SCENE_3) {
+      result.scene_3 = value;
+    } else if (imageType === IMAGES_TYPE.SCENE_4) {
+      result.scene_4 = value;
+    } else if (imageType === IMAGES_TYPE.CLOSING) {
+      result.closing = value;
+    }
+  }
+
+  private static async fetchImageMetadata(options: FetchImageMetadataOptions): Promise<StoryImageMetadataRecord[]> {
+    if (options.adminCode) {
+      console.log('[StoryPdfService] Using admin metadata fetch for story:', options.storyId);
+      return this.fetchImageMetadataViaAdmin(options);
+    }
+
+    return this.fetchImageMetadataViaSupabase(options);
+  }
+
+  private static async fetchImageMetadataViaAdmin(
+    options: FetchImageMetadataOptions
+  ): Promise<StoryImageMetadataRecord[]> {
+    const { storyId, chapterId, imageTypes, adminCode } = options;
+
+    if (!adminCode) {
+      throw new Error('Código de administrador requerido para la consulta protegida de imágenes');
+    }
+
+    if (!APP_CONFIG.supabaseUrl || !APP_CONFIG.supabaseAnonKey) {
+      throw new Error('Configuración de Supabase incompleta para solicitudes administrativas de metadatos de imágenes');
+    }
+
+    let response: Response;
+
+    try {
+      response = await fetch(`${APP_CONFIG.supabaseUrl}/functions/v1/admin-get-story-images`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${APP_CONFIG.supabaseAnonKey}`,
+        },
+        body: JSON.stringify({
+          storyId,
+          chapterId: chapterId ?? null,
+          imageTypes,
+          adminCode,
+        }),
+      });
+    } catch (error) {
+      console.error('[StoryPdfService] Error contacting admin image metadata function:', error);
+      throw new Error('No se pudo contactar al servicio administrativo de metadatos de imágenes');
+    }
+
+    type AdminMetadataResponse = {
+      metadata?: StoryImageMetadataRecord[];
+      error?: string;
+      details?: string;
+      message?: string;
+    };
+
+    let payload: AdminMetadataResponse;
+
+    try {
+      payload = await response.json();
+    } catch (error) {
+      console.error('[StoryPdfService] Error parsing admin metadata response:', error);
+      throw new Error('No se pudo interpretar la respuesta del servicio de metadatos (admin)');
+    }
+
+    if (!response.ok) {
+      const errorMessage =
+        payload?.error || payload?.details || payload?.message || 'Error al consultar metadatos de imágenes (admin)';
+      throw new Error(errorMessage);
+    }
+
+    return Array.isArray(payload?.metadata) ? payload.metadata : [];
+  }
+
+  private static async fetchImageMetadataViaSupabase(
+    options: FetchImageMetadataOptions
+  ): Promise<StoryImageMetadataRecord[]> {
+    const { storyId, imageTypes } = options;
+
+    const { data, error } = await supabase
+      .from('story_images')
+      .select(
+        'image_type, storage_path, provider, fallback_used, mime_type, original_resolution, final_resolution, resized_from, resized_to, latency_ms, chapter_id'
+      )
+      .eq('story_id', storyId)
+      .in('image_type', imageTypes);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return Array.isArray(data) ? data : [];
+  }
+
+  private static async tryLegacyStorageFallback(
+    storyId: string,
+    chapterId: string | undefined,
+    imageType: string
+  ): Promise<StoryImageValidationDetail | null> {
+    const cleanedChapterId = typeof chapterId === 'string' && chapterId.trim().length > 0 ? chapterId.trim() : undefined;
+    const basePaths = new Set<string>();
+
+    if (cleanedChapterId) {
+      basePaths.add(`${storyId}/${cleanedChapterId}`);
+    }
+    basePaths.add(storyId);
+
+    for (const basePath of basePaths) {
+      for (const extension of this.LEGACY_IMAGE_EXTENSIONS) {
+        const storagePath = `${basePath}/${imageType}.${extension}`;
+        const { data: publicUrlData } = supabase.storage
+          .from(this.IMAGE_BUCKET)
+          .getPublicUrl(storagePath);
+
+        const publicUrl = publicUrlData?.publicUrl;
+        if (!publicUrl) {
+          continue;
+        }
+
+        try {
+          const response = await fetch(publicUrl, { method: 'HEAD' });
+          if (!response.ok) {
+            continue;
+          }
+        } catch (error) {
+          console.warn(`[StoryPdfService] Legacy fallback HEAD failed for ${storagePath}`, error);
+          continue;
+        }
+
+        console.log(`[StoryPdfService] 🔁 Using legacy storage fallback for ${imageType}: ${storagePath}`);
+
+        return {
+          publicUrl,
+          providerUsed: undefined,
+          fallbackUsed: true,
+          latencyMs: undefined,
+          requestedAspectRatio: undefined,
+          effectiveAspectRatio: undefined,
+          requestSize: undefined,
+          originalResolution: undefined,
+          finalResolution: undefined,
+          resizedFrom: undefined,
+          resizedTo: undefined,
+          mimeType: undefined,
+          storagePath,
+          storyId,
+          chapterId: cleanedChapterId,
+          imageType,
+        };
+      }
+    }
+
+    console.log(`[StoryPdfService] ❌ Legacy fallback could not locate ${imageType}`);
+    return null;
+  }
+
   /**
    * Validates if illustrated PDF generation is possible for given story
    * @param storyId Story identifier
@@ -373,6 +656,54 @@ export class StoryPdfService {
       console.error('[StoryPdfService] Error in loadImageAsDataUrl:', error);
       throw error;
     }
+  }
+
+  private static async drawImageWithinLayout(pdf: jsPDF, imageData: string): Promise<void> {
+    const layout = getImageLayout();
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const dpi = 200; // Layout defined at 200 dpi
+    const pxToMm = 25.4 / dpi;
+
+    const { width: imageWidthPx, height: imageHeightPx } = await this.getImageDimensions(imageData);
+    if (imageWidthPx === 0 || imageHeightPx === 0) {
+      throw new Error('Dimensiones de la imagen no válidas');
+    }
+
+    const innerWidthPx = layout.canvas.width - layout.safeMarginPx.left - layout.safeMarginPx.right;
+    const innerHeightPx = layout.canvas.height - layout.safeMarginPx.top - layout.safeMarginPx.bottom;
+
+    const imageAspect = imageWidthPx / imageHeightPx;
+    let drawWidthPx = innerWidthPx;
+    let drawHeightPx = drawWidthPx / imageAspect;
+
+    if (drawHeightPx > innerHeightPx) {
+      drawHeightPx = innerHeightPx;
+      drawWidthPx = drawHeightPx * imageAspect;
+    }
+
+    const drawWidthMm = drawWidthPx * pxToMm;
+    const drawHeightMm = drawHeightPx * pxToMm;
+    const innerWidthMm = innerWidthPx * pxToMm;
+    const innerHeightMm = innerHeightPx * pxToMm;
+    const marginLeftMm = layout.safeMarginPx.left * pxToMm;
+    const marginTopMm = layout.safeMarginPx.top * pxToMm;
+
+    const offsetX = marginLeftMm + (innerWidthMm - drawWidthMm) / 2;
+    const offsetY = marginTopMm + (innerHeightMm - drawHeightMm) / 2;
+
+    pdf.setFillColor(255, 255, 255);
+    pdf.rect(0, 0, pageWidth, pageHeight, 'F');
+    pdf.addImage(imageData, 'JPEG', offsetX, offsetY, drawWidthMm, drawHeightMm, undefined, 'FAST');
+  }
+
+  private static async getImageDimensions(imageData: string): Promise<{ width: number; height: number }> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.width, height: img.height });
+      img.onerror = () => reject(new Error('No se pudieron obtener las dimensiones de la imagen'));
+      img.src = imageData;
+    });
   }
 
   /**
@@ -657,72 +988,71 @@ export class StoryPdfService {
     for (let i = 0; i < 4; i++) {
       const sectionContent = sections[i];
       const sceneImage = sceneImages[i];
+      const hasTextContent = Boolean(sectionContent && sectionContent.trim() !== '');
       
-      if (!sectionContent || sectionContent.trim() === '') {
-        console.log(`[StoryPdfService] Section ${i + 1} is empty, skipping`);
-        continue;
-      }
-      
-      // --- TEXT PAGE ---
-      console.log(`[StoryPdfService] Adding text page for section ${i + 1}`);
-      pdf.addPage();
-      
-      // White background
-      pdf.setFillColor(255, 255, 255);
-      pdf.rect(0, 0, pageWidth, pageHeight, 'F');
-      
-      // Set Georgia font (or fallback)
-      // jsPDF supports: times, helvetica, courier - Georgia is not native but Times is similar
-      pdf.setFont('times', 'normal');
-      pdf.setFontSize(14);
-      pdf.setTextColor('#000000');
-      
-      // Split section into paragraphs
-      const paragraphs = sectionContent.split('\n\n').filter(p => p.trim() !== '');
-      const finalParagraphs = paragraphs.length > 0 ? paragraphs : sectionContent.split('\n').filter(p => p.trim() !== '');
-      
-      // Add paragraphs to page
-      let yPos = margin;
-      
-      for (const paragraph of finalParagraphs) {
-        if (!paragraph || paragraph.trim() === '') continue;
+      if (!hasTextContent) {
+        console.log(`[StoryPdfService] Section ${i + 1} has no text content, skipping text page but keeping illustration`);
+      } else {
+        // --- TEXT PAGE ---
+        console.log(`[StoryPdfService] Adding text page for section ${i + 1}`);
+        pdf.addPage();
         
-        // Split text to fit width
-        const lines = pdf.splitTextToSize(paragraph, effectiveWidth);
+        // White background
+        pdf.setFillColor(255, 255, 255);
+        pdf.rect(0, 0, pageWidth, pageHeight, 'F');
         
-        // Calculate space needed
-        const lineHeight = 7; // mm per line for 14pt font
-        const paragraphSpacing = 5; // Extra space between paragraphs
-        const requiredSpace = lines.length * lineHeight + paragraphSpacing;
+        // Set Georgia font (or fallback)
+        // jsPDF supports: times, helvetica, courier - Georgia is not native but Times is similar
+        pdf.setFont('times', 'normal');
+        pdf.setFontSize(14);
+        pdf.setTextColor('#000000');
         
-        // Check if we need a new page
-        if (yPos + requiredSpace > pageHeight - margin) {
-          // Add another text page if content doesn't fit
-          pdf.addPage();
-          pdf.setFillColor(255, 255, 255);
-          pdf.rect(0, 0, pageWidth, pageHeight, 'F');
-          pdf.setFont('times', 'normal');
-          pdf.setFontSize(14);
-          pdf.setTextColor('#000000');
-          yPos = margin;
+        // Split section into paragraphs
+        const paragraphs = sectionContent.split('\n\n').filter(p => p.trim() !== '');
+        const finalParagraphs = paragraphs.length > 0 ? paragraphs : sectionContent.split('\n').filter(p => p.trim() !== '');
+        
+        // Add paragraphs to page
+        let yPos = margin;
+        
+        for (const paragraph of finalParagraphs) {
+          if (!paragraph || paragraph.trim() === '') continue;
+          
+          // Split text to fit width
+          const lines = pdf.splitTextToSize(paragraph, effectiveWidth);
+          
+          // Calculate space needed
+          const lineHeight = 7; // mm per line for 14pt font
+          const paragraphSpacing = 5; // Extra space between paragraphs
+          const requiredSpace = lines.length * lineHeight + paragraphSpacing;
+          
+          // Check if we need a new page
+          if (yPos + requiredSpace > pageHeight - margin) {
+            // Add another text page if content doesn't fit
+            pdf.addPage();
+            pdf.setFillColor(255, 255, 255);
+            pdf.rect(0, 0, pageWidth, pageHeight, 'F');
+            pdf.setFont('times', 'normal');
+            pdf.setFontSize(14);
+            pdf.setTextColor('#000000');
+            yPos = margin;
+          }
+          
+          // Add text lines
+          for (const line of lines) {
+            pdf.text(line, margin, yPos);
+            yPos += lineHeight;
+          }
+          
+          yPos += paragraphSpacing; // Space between paragraphs
         }
-        
-        // Add text lines
-        for (const line of lines) {
-          pdf.text(line, margin, yPos);
-          yPos += lineHeight;
-        }
-        
-        yPos += paragraphSpacing; // Space between paragraphs
       }
       
       // --- IMAGE PAGE ---
       console.log(`[StoryPdfService] Adding image page for scene ${i + 1}`);
       pdf.addPage();
       
-      // Add full-page image without margins
       try {
-        pdf.addImage(sceneImage, 'JPEG', 0, 0, pageWidth, pageHeight);
+        await this.drawImageWithinLayout(pdf, sceneImage);
       } catch (error) {
         console.error(`[StoryPdfService] Error adding scene ${i + 1} image:`, error);
         // Fallback to white page with error message
@@ -750,8 +1080,7 @@ export class StoryPdfService {
     
     try {
       
-      // Add closing image as background
-      pdf.addImage(closingImageData, 'JPEG', 0, 0, pageWidth, pageHeight);
+      await this.drawImageWithinLayout(pdf, closingImageData);
       
       // Add white footer strip at bottom (similar to cover)
       const stripHeight = 25; // mm - discrete footer
@@ -1098,13 +1427,18 @@ export class StoryPdfService {
       } else {
         console.log('[StoryPdfService] All images exist, proceeding with PDF generation...');
         imageUrls = {
-          cover: imageValidation.imageUrls!.cover!,
-          scene_1: imageValidation.imageUrls!.scene_1!,
-          scene_2: imageValidation.imageUrls!.scene_2!,
-          scene_3: imageValidation.imageUrls!.scene_3!,
-          scene_4: imageValidation.imageUrls!.scene_4!,
-          closing: imageValidation.imageUrls!.closing!
+          cover: imageValidation.imageDetails?.[IMAGES_TYPE.COVER]?.publicUrl ?? '',
+          scene_1: imageValidation.imageDetails?.[IMAGES_TYPE.SCENE_1]?.publicUrl ?? '',
+          scene_2: imageValidation.imageDetails?.[IMAGES_TYPE.SCENE_2]?.publicUrl ?? '',
+          scene_3: imageValidation.imageDetails?.[IMAGES_TYPE.SCENE_3]?.publicUrl ?? '',
+          scene_4: imageValidation.imageDetails?.[IMAGES_TYPE.SCENE_4]?.publicUrl ?? '',
+          closing: imageValidation.imageDetails?.[IMAGES_TYPE.CLOSING]?.publicUrl ?? ''
         };
+        for (const key of Object.keys(imageUrls) as (keyof typeof imageUrls)[]) {
+          if (!imageUrls[key]) {
+            throw new Error(`Faltó la URL pública para ${key} a pesar de validación positiva`);
+          }
+        }
       }
       
       // Step 3: Generate illustrated PDF
@@ -1149,7 +1483,13 @@ export class StoryPdfService {
   private static async generateImagesWithProgress(
     options: { storyId: string; chapterId: string },
     onProgress?: (progress: ImageGenerationProgress) => void
-  ): Promise<{ success: boolean; imageUrls?: { cover: string; scene_1: string; scene_2: string; scene_3: string; scene_4: string; closing: string }; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    imageUrls?: { cover: string; scene_1: string; scene_2: string; scene_3: string; scene_4: string; closing: string };
+    metadataByType?: Record<string, GeneratedImageMetadata>;
+    summary?: ImageGenerationSummary;
+    error?: string;
+  }> {
     try {
       const { storyId, chapterId } = options;
       
@@ -1238,6 +1578,12 @@ export class StoryPdfService {
           chapterId,
           scenes: scenes
         });
+
+        if (result.summary) {
+          console.log(
+            `[StoryPdfService] Providers default=${result.summary.defaultProvider} fallback=${result.summary.fallbackProvider} | ratio ${result.summary.requestedAspectRatio} → ${result.summary.resolvedAspectRatio}`
+          );
+        }
         
         clearInterval(progressInterval);
         
@@ -1301,7 +1647,9 @@ export class StoryPdfService {
             scene_3: imageUrls.scene_3!,
             scene_4: imageUrls.scene_4!,
             closing: imageUrls.closing!
-          }
+          },
+          metadataByType: result.metadataByType,
+          summary: result.summary,
         };
         
       } catch (error) {

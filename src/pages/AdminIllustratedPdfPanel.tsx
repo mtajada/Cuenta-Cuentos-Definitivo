@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { StoryWithChapters, StoryChapter } from '../types';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -7,17 +7,56 @@ import { Label } from '../components/ui/label';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Badge } from '../components/ui/badge';
 import { Lock, Search, FileText, Download, Loader2 } from 'lucide-react';
-import { StoryPdfService, ImageGenerationProgress } from '../services/storyPdfService';
+import { StoryPdfService, ImageGenerationProgress, StoryImageValidationDetail } from '../services/storyPdfService';
 import { Progress } from '../components/ui/progress';
 import { APP_CONFIG } from '../config/app';
+import { Switch } from '../components/ui/switch';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { getImageProviderConfig } from '@/services/ai/imageProviderConfig';
+import { getImageLayout, mapAspectRatio } from '@/lib/image-layout';
+import { IMAGES_TYPE } from '../constants/story-images.constant';
 
 const ADMIN_CODE = 'TaleMe2025';
+
+const IMAGE_TYPE_ORDER = [
+  IMAGES_TYPE.COVER,
+  IMAGES_TYPE.SCENE_1,
+  IMAGES_TYPE.SCENE_2,
+  IMAGES_TYPE.SCENE_3,
+  IMAGES_TYPE.SCENE_4,
+  IMAGES_TYPE.CLOSING,
+  IMAGES_TYPE.CHARACTER,
+] as const;
+
+const IMAGE_TYPE_LABELS: Record<string, string> = {
+  [IMAGES_TYPE.COVER]: 'Portada',
+  [IMAGES_TYPE.SCENE_1]: 'Escena 1',
+  [IMAGES_TYPE.SCENE_2]: 'Escena 2',
+  [IMAGES_TYPE.SCENE_3]: 'Escena 3',
+  [IMAGES_TYPE.SCENE_4]: 'Escena 4',
+  [IMAGES_TYPE.CLOSING]: 'Cierre',
+  [IMAGES_TYPE.CHARACTER]: 'Personaje',
+};
 
 /**
  * Admin panel for generating illustrated PDFs by story ID
  * Protected with a simple code authentication
  */
 export default function AdminIllustratedPdfPanel() {
+  const providerConfig = useMemo(() => getImageProviderConfig(), []);
+  const aspectRatioInfo = useMemo(
+    () => mapAspectRatio(providerConfig.desiredAspectRatio),
+    [providerConfig.desiredAspectRatio]
+  );
+  const layoutSpec = useMemo(
+    () => getImageLayout({ aspectRatio: providerConfig.desiredAspectRatio }),
+    [providerConfig.desiredAspectRatio]
+  );
+  const canvasResolution = useMemo(
+    () => `${layoutSpec.canvas.width}x${layoutSpec.canvas.height}`,
+    [layoutSpec.canvas.height, layoutSpec.canvas.width]
+  );
+
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authCode, setAuthCode] = useState('');
   const [authError, setAuthError] = useState('');
@@ -30,6 +69,50 @@ export default function AdminIllustratedPdfPanel() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [progress, setProgress] = useState<ImageGenerationProgress | null>(null);
+  const [imageDetails, setImageDetails] = useState<Record<string, StoryImageValidationDetail> | null>(null);
+  const [metadataLoading, setMetadataLoading] = useState(false);
+  const [metadataError, setMetadataError] = useState('');
+  const [missingImages, setMissingImages] = useState<string[]>([]);
+
+  const loadMetadata = useCallback(
+    async (targetStoryId: string, targetChapterId: string) => {
+      if (!targetStoryId || !targetChapterId) {
+        setImageDetails(null);
+        setMissingImages([]);
+        return;
+      }
+
+      setMetadataLoading(true);
+      setMetadataError('');
+
+      try {
+        const validation = await StoryPdfService.validateRequiredImages(targetStoryId, targetChapterId, {
+          adminCode: ADMIN_CODE,
+        });
+        setImageDetails(validation.imageDetails ?? null);
+        setMissingImages(validation.missingImages ?? []);
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'No se pudieron cargar los metadatos de las imágenes.';
+        setMetadataError(message);
+        console.error('[AdminIllustratedPdfPanel] Error loading metadata:', err);
+      } finally {
+        setMetadataLoading(false);
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (story && selectedChapterId) {
+      loadMetadata(story.id, selectedChapterId);
+    } else {
+      setImageDetails(null);
+      setMissingImages([]);
+    }
+  }, [loadMetadata, selectedChapterId, story]);
 
   /**
    * Handles admin code authentication
@@ -121,6 +204,30 @@ export default function AdminIllustratedPdfPanel() {
     }
   };
 
+  const renderNormalizationInfo = (detail?: StoryImageValidationDetail) => {
+    if (!detail) {
+      return <span className="text-muted-foreground">—</span>;
+    }
+
+    const fromLabel = detail.resizedFrom ?? detail.originalResolution ?? null;
+    const toLabel = detail.resizedTo ?? detail.finalResolution ?? null;
+
+    if (!detail.resizedFrom && !detail.resizedTo) {
+      return <Badge variant="outline">Sin cambios</Badge>;
+    }
+
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="outline">
+          {(fromLabel ?? '—') + ' → ' + (toLabel ?? '—')}
+        </Badge>
+        {detail.resizedTo && detail.resizedTo === canvasResolution ? (
+          <Badge variant="secondary">Lienzo A4</Badge>
+        ) : null}
+      </div>
+    );
+  };
+
   /**
    * Generates illustrated PDF for the selected chapter
    */
@@ -159,6 +266,8 @@ export default function AdminIllustratedPdfPanel() {
       link.download = `${story.title.replace(/[^a-z0-9]/gi, '_')}_${selectedChapter.chapterNumber}_ilustrado.pdf`;
       link.click();
       URL.revokeObjectURL(url);
+
+      await loadMetadata(story.id, selectedChapterId);
 
       setSuccess('¡PDF ilustrado generado y descargado exitosamente!');
     } catch (err) {
@@ -226,6 +335,192 @@ export default function AdminIllustratedPdfPanel() {
               Busca historias por ID y genera PDFs ilustrados con imágenes generadas por IA
             </CardDescription>
           </CardHeader>
+        </Card>
+
+        {/* Providers */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-2xl">Proveedor de imágenes activo</CardTitle>
+            <CardDescription>
+              Valores actuales de las variables VITE_IMAGE_PROVIDER_DEFAULT y VITE_IMAGE_PROVIDER_FALLBACK
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="flex items-center justify-between rounded-lg border border-dashed p-4">
+                <div>
+                  <p className="text-sm font-medium">Proveedor principal</p>
+                  <p className="text-xs text-muted-foreground">VITE_IMAGE_PROVIDER_DEFAULT</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Badge>{providerConfig.defaultProvider.toUpperCase()}</Badge>
+                  <Switch checked disabled aria-label="Proveedor principal activo" />
+                </div>
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-dashed p-4">
+                <div>
+                  <p className="text-sm font-medium">Proveedor de respaldo</p>
+                  <p className="text-xs text-muted-foreground">VITE_IMAGE_PROVIDER_FALLBACK</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Badge variant="outline">{providerConfig.fallbackProvider.toUpperCase()}</Badge>
+                  <Switch checked={false} disabled aria-label="Proveedor de respaldo configurado" />
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
+              <span>
+                Ratio preferido:&nbsp;
+                <Badge variant="secondary">{aspectRatioInfo.requested}</Badge>
+              </span>
+              <span>
+                Gemini resuelve:&nbsp;
+                <Badge variant={aspectRatioInfo.isFallback ? 'destructive' : 'default'}>
+                  {aspectRatioInfo.resolved}
+                  {aspectRatioInfo.isFallback ? ' (fallback)' : ''}
+                </Badge>
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Metadata */}
+        <Card>
+          <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <CardTitle className="text-2xl">Metadatos de ilustraciones</CardTitle>
+              <CardDescription>
+                Registros más recientes para el capítulo seleccionado
+              </CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => story && selectedChapterId && loadMetadata(story.id, selectedChapterId)}
+              disabled={!story || !selectedChapterId || metadataLoading}
+            >
+              {metadataLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Actualizando...
+                </>
+              ) : (
+                'Actualizar'
+              )}
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {metadataError && (
+              <Alert variant="destructive">
+                <AlertDescription>{metadataError}</AlertDescription>
+              </Alert>
+            )}
+
+            {metadataLoading && !imageDetails && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Cargando metadatos de ilustraciones...
+              </div>
+            )}
+
+            {imageDetails && Object.keys(imageDetails).length > 0 ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Imagen</TableHead>
+                      <TableHead>Proveedor</TableHead>
+                      <TableHead>Fallback</TableHead>
+                      <TableHead>Resolución final</TableHead>
+                      <TableHead>Normalización</TableHead>
+                      <TableHead>Resolución original</TableHead>
+                      <TableHead>Latencia</TableHead>
+                      <TableHead>MIME</TableHead>
+                      <TableHead>Storage</TableHead>
+                      <TableHead>URL</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {IMAGE_TYPE_ORDER.filter(type => type !== IMAGES_TYPE.CHARACTER || imageDetails?.[type]).map((type) => {
+                      const detail = imageDetails?.[type];
+                      const label = IMAGE_TYPE_LABELS[type] ?? type;
+                      const isMissing = missingImages.includes(label);
+
+                      return (
+                        <TableRow key={type}>
+                          <TableCell className="font-medium">{label}</TableCell>
+                          <TableCell>
+                            {detail?.providerUsed ? (
+                              <Badge variant="secondary">{detail.providerUsed.toUpperCase()}</Badge>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {detail ? (
+                              detail.fallbackUsed ? (
+                                <Badge variant="destructive">Fallback</Badge>
+                              ) : (
+                                <Badge variant="outline">Principal</Badge>
+                              )
+                            ) : isMissing ? (
+                            <Badge variant="outline">Pendiente</Badge>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>{detail?.finalResolution ?? detail?.originalResolution ?? '—'}</TableCell>
+                        <TableCell>{renderNormalizationInfo(detail)}</TableCell>
+                        <TableCell>{detail?.originalResolution ?? '—'}</TableCell>
+                        <TableCell>{detail?.latencyMs ? `${detail.latencyMs} ms` : '—'}</TableCell>
+                        <TableCell>
+                          {detail?.mimeType ? (
+                            <Badge variant="secondary">{detail.mimeType}</Badge>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {detail?.storagePath ? (
+                            <code className="text-xs break-all">{detail.storagePath}</code>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {detail ? (
+                            <Button asChild variant="link" size="sm" className="px-0">
+                              <a href={detail.publicUrl} target="_blank" rel="noopener noreferrer">
+                                Abrir
+                              </a>
+                            </Button>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : !metadataLoading ? (
+              <p className="text-sm text-muted-foreground">
+                {story && selectedChapterId
+                  ? 'Aún no hay metadatos registrados para este capítulo.'
+                  : 'Selecciona una historia y un capítulo para revisar los metadatos disponibles.'}
+              </p>
+            ) : null}
+
+            {missingImages.length > 0 && (
+              <div className="text-sm">
+                <p className="font-medium text-amber-600">Imágenes pendientes:</p>
+                <p className="text-muted-foreground">
+                  {missingImages.join(', ')}
+                </p>
+              </div>
+            )}
+          </CardContent>
         </Card>
 
         {/* Story Search */}
@@ -395,4 +690,3 @@ export default function AdminIllustratedPdfPanel() {
     </div>
   );
 }
-
