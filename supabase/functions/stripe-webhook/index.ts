@@ -28,6 +28,62 @@ const cryptoProvider = Stripe.createSubtleCryptoProvider();
 
 const supabaseAdmin = createClient(SUPABASE_URL!, APP_SERVICE_ROLE_KEY!);
 
+interface ProfileUpdatePayload {
+  subscription_id?: string | null;
+  subscription_status?: string | null;
+  stripe_customer_id?: string | null;
+  period_start_date?: string | null;
+  current_period_end?: string | null;
+  voice_credits?: number | null;
+  monthly_voice_generations_used?: number | null;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const extractCustomerId = (object: Stripe.Event.Data.Object): string | null => {
+  if (isRecord(object) && 'customer' in object) {
+    const { customer } = object as { customer?: unknown };
+    if (typeof customer === 'string') {
+      return customer;
+    }
+    if (isRecord(customer) && 'id' in customer && typeof (customer as { id?: unknown }).id === 'string') {
+      return (customer as { id: string }).id;
+    }
+  }
+  return null;
+};
+
+const extractMetadata = (object: Stripe.Event.Data.Object): Stripe.Metadata | null => {
+  if (isRecord(object) && 'metadata' in object) {
+    const { metadata } = object as { metadata?: unknown };
+    if (isRecord(metadata)) {
+      return metadata as Stripe.Metadata;
+    }
+  }
+  return null;
+};
+
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error && typeof error.message === 'string') {
+    return error.message;
+  }
+  if (isRecord(error) && 'message' in error) {
+    const { message } = error as { message?: unknown };
+    if (typeof message === 'string') {
+      return message;
+    }
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+};
+
+const isStripeSignatureError = (error: unknown): boolean =>
+  isRecord(error) && 'type' in error && (error as { type?: unknown }).type === 'StripeSignatureVerificationError';
+
 console.log('[WEBHOOK_DEBUG] Stripe Webhook Function Initialized successfully.');
 
 // --- Lógica Principal del Servidor ---
@@ -58,32 +114,41 @@ serve(async (req: Request) => {
     console.log(`[WEBHOOK_INFO] Webhook event received: ${event.id}, Type: ${event.type}`);
 
     // 2. Maneja el evento
-    const eventObject = event.data.object as any;
+    const eventObject = event.data.object;
+    if (!eventObject) {
+      throw new Error(`[WEBHOOK_ERROR] Event ${event.id} is missing data.object payload.`);
+    }
     let supabaseUserId: string | null = null;
     let stripeCustomerId: string | null = null;
 
     // --- Inicio: Lógica robusta para identificar al usuario ---
     console.log('[WEBHOOK_DEBUG] Attempting to identify user...');
-    if (eventObject.customer) {
-      stripeCustomerId = eventObject.customer;
+    const customerIdFromEvent = extractCustomerId(eventObject);
+    if (customerIdFromEvent) {
+      stripeCustomerId = customerIdFromEvent;
       console.log(`[WEBHOOK_DEBUG] Found stripeCustomerId from event object: ${stripeCustomerId}`);
     }
 
-    if (eventObject.metadata?.supabase_user_id) {
-      supabaseUserId = eventObject.metadata.supabase_user_id;
+    const eventMetadata = extractMetadata(eventObject);
+    const metadataSupabaseUserId = eventMetadata?.supabase_user_id ?? null;
+    if (metadataSupabaseUserId && typeof metadataSupabaseUserId === 'string') {
+      supabaseUserId = metadataSupabaseUserId;
       console.log(`[WEBHOOK_DEBUG] Found supabaseUserId from event metadata: ${supabaseUserId}`);
     }
     else if (stripeCustomerId) {
       console.log(`[WEBHOOK_DEBUG] supabaseUserId not in event metadata, trying customer metadata for ${stripeCustomerId}...`);
       try {
-        const customer = await stripe.customers.retrieve(stripeCustomerId) as Stripe.Customer;
+        const customer = await stripe.customers.retrieve(stripeCustomerId);
         if (!customer.deleted && customer.metadata?.supabase_user_id) {
           supabaseUserId = customer.metadata.supabase_user_id;
           console.log(`[WEBHOOK_DEBUG] Found supabaseUserId from customer metadata: ${supabaseUserId}`);
         } else {
           console.log(`[WEBHOOK_DEBUG] supabase_user_id not found in customer metadata or customer deleted.`);
         }
-      } catch (customerError) { console.warn(`[WEBHOOK_WARN] Error retrieving customer ${stripeCustomerId}:`, customerError.message); }
+      } catch (customerError: unknown) {
+        const message = getErrorMessage(customerError);
+        console.warn(`[WEBHOOK_WARN] Error retrieving customer ${stripeCustomerId}: ${message}`, customerError);
+      }
     }
 
     if (!supabaseUserId && stripeCustomerId) {
@@ -99,8 +164,9 @@ serve(async (req: Request) => {
         } else {
           console.log(`[WEBHOOK_DEBUG] Profile not found for stripe_customer_id ${stripeCustomerId}.`);
         }
-      } catch (dbError) {
-        console.error(`[WEBHOOK_ERROR] Exception querying profiles table for customer ${stripeCustomerId}:`, dbError.message);
+      } catch (dbError: unknown) {
+        const message = getErrorMessage(dbError);
+        console.error(`[WEBHOOK_ERROR] Exception querying profiles table for customer ${stripeCustomerId}: ${message}`, dbError);
       }
     }
 
@@ -135,18 +201,20 @@ serve(async (req: Request) => {
           
           console.log(`[WEBHOOK_INFO] Updating profile for new subscription ${subscription.id} for user ${supabaseUserId}`);
           console.log(`[WEBHOOK_DEBUG] Subscription details: Status=${status}, Period=${currentPeriodStart.toISOString()} to ${currentPeriodEnd.toISOString()}`);
-          
+        
+          const profileUpdate: ProfileUpdatePayload = {
+            subscription_id: subscription.id,
+            subscription_status: status === 'active' ? 'active' : status,
+            stripe_customer_id: stripeCustomerId,
+            period_start_date: currentPeriodStart.toISOString(),
+            current_period_end: currentPeriodEnd.toISOString(),
+            voice_credits: 10,
+            monthly_voice_generations_used: 0,
+          };
+
           const { error } = await supabaseAdmin
             .from('profiles')
-            .update({
-              subscription_id: subscription.id, // También mantener este campo si existe en tu esquema
-              subscription_status: status === 'active' ? 'active' : status, // Asegurar que sea 'active' para suscripciones activas
-              stripe_customer_id: stripeCustomerId,
-              period_start_date: currentPeriodStart.toISOString(), // 1. Fecha de inicio del periodo
-              current_period_end: currentPeriodEnd.toISOString(), // 4. Fecha de fin del periodo
-              voice_credits: 10, // 3. Dar 10 créditos de voz al activar premium
-              monthly_voice_generations_used: 0, // Resetear contador mensual
-            })
+            .update(profileUpdate)
             .eq('id', supabaseUserId);
 
           if (error) {
@@ -269,13 +337,15 @@ serve(async (req: Request) => {
           const currentPeriodEnd = new Date(subscription.current_period_end * 1000);
 
           console.log(`[WEBHOOK_INFO] Resetting monthly usage for user ${supabaseUserId} due to subscription renewal.`);
+          const renewalUpdate: ProfileUpdatePayload = {
+            subscription_status: subscription.status,
+            current_period_end: currentPeriodEnd.toISOString(),
+            monthly_voice_generations_used: 0,
+          };
+
           const { error } = await supabaseAdmin
             .from('profiles')
-            .update({
-              subscription_status: subscription.status,
-              current_period_end: currentPeriodEnd.toISOString(),
-              monthly_voice_generations_used: 0, // Resetear uso mensual
-            })
+            .update(renewalUpdate)
             .eq('id', supabaseUserId);
 
           if (error) {
@@ -298,7 +368,7 @@ serve(async (req: Request) => {
         const status = subscription.status;
         const currentPeriodEnd = new Date(subscription.current_period_end * 1000);
 
-        const updatePayload: { [key: string]: any } = {
+        const updatePayload: ProfileUpdatePayload = {
           subscription_status: status,
           current_period_end: currentPeriodEnd.toISOString(),
         };
@@ -329,14 +399,15 @@ serve(async (req: Request) => {
         if (!stripeCustomerId) throw new Error(`[WEBHOOK_ERROR] Cannot process subscription delete ${subscription.id}: missing stripe_customer_id.`);
 
         console.log(`[WEBHOOK_INFO] Updating profile for customer.subscription.deleted using customer ID ${stripeCustomerId}`);
+        const subscriptionDeletedUpdate: ProfileUpdatePayload = {
+          subscription_status: 'canceled',
+          current_period_end: null,
+          monthly_voice_generations_used: 0,
+        };
+
         const { error } = await supabaseAdmin
           .from('profiles')
-          .update({
-            subscription_status: 'canceled',
-            current_period_end: null,
-            monthly_voice_generations_used: 0,
-            // voice_credits: 0, // Comentado para conservar créditos comprados
-          })
+          .update(subscriptionDeletedUpdate)
           .eq('stripe_customer_id', stripeCustomerId);
 
         if (error) {
@@ -355,10 +426,11 @@ serve(async (req: Request) => {
     console.log(`[WEBHOOK_INFO] Webhook processed successfully for event: ${event.id}`);
     return new Response(JSON.stringify({ received: true }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-  } catch (err) {
+  } catch (err: unknown) {
     console.error('[WEBHOOK_ERROR] FATAL: Webhook handler error:', err);
-    const isSignatureError = err.type === 'StripeSignatureVerificationError';
-    const status = isSignatureError ? 400 : 500;
-    return new Response(`Webhook Error: ${err.message}`, { status: status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const signatureError = isStripeSignatureError(err);
+    const status = signatureError ? 400 : 500;
+    const errorMessage = getErrorMessage(err);
+    return new Response(`Webhook Error: ${errorMessage}`, { status: status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });

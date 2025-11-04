@@ -13,14 +13,42 @@ import {
   type ContinuationContextType,
 } from './prompt.ts';
 
-// --- Configuración Global ---
-const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
-const GEMINI_COMPATIBLE_ENDPOINT = Deno.env.get("GEMINI_COMPATIBLE_ENDPOINT") || 'https://generativelanguage.googleapis.com/v1beta/openai/';
-const TEXT_MODEL_GENERATE = Deno.env.get('TEXT_MODEL_GENERATE');
+type ContinuationActionType = 'freeContinuation' | 'optionContinuation' | 'directedContinuation';
 
-if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY environment variable not set");
+interface ContinuationRequestBody {
+  action?: string;
+  story?: Story;
+  chapters?: Chapter[] | null;
+  selectedOptionSummary?: string;
+  userDirection?: string;
+  language?: string;
+  childAge?: number;
+  specialNeed?: string | null;
+  storyDuration?: string;
+}
+
+function getRequiredEnvVar(key: string, errorMessage: string): string {
+  const value = Deno.env.get(key);
+  if (!value) {
+    throw new Error(errorMessage);
+  }
+  return value;
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function isContinuationActionType(action: string): action is ContinuationActionType {
+  return action === 'freeContinuation' || action === 'optionContinuation' || action === 'directedContinuation';
+}
+
+// --- Configuración Global ---
+const GEMINI_API_KEY = getRequiredEnvVar("GEMINI_API_KEY", "GEMINI_API_KEY environment variable not set");
+const GEMINI_COMPATIBLE_ENDPOINT = Deno.env.get("GEMINI_COMPATIBLE_ENDPOINT") || 'https://generativelanguage.googleapis.com/v1beta/openai/';
+const TEXT_MODEL_GENERATE = getRequiredEnvVar('TEXT_MODEL_GENERATE', "TEXT_MODEL_GENERATE environment variable not set for OpenAI client.");
+
 if (!GEMINI_COMPATIBLE_ENDPOINT) throw new Error("GEMINI_COMPATIBLE_ENDPOINT environment variable not set");
-if (!TEXT_MODEL_GENERATE) throw new Error("TEXT_MODEL_GENERATE environment variable not set for OpenAI client.");
 
 const openai = new OpenAI({
   apiKey: GEMINI_API_KEY,
@@ -46,17 +74,29 @@ interface AiContinuationResponse {
   content: string;
 }
 
-// --- Validation functions for AI responses ---
-function isValidOptionsResponse(data: any): data is AiContinuationOptionsResponse {
-  return data &&
-    Array.isArray(data.options) &&
-    data.options.every((opt: any) => typeof opt.summary === 'string' && opt.summary.trim() !== '');
+type ContinuationResponsePayload =
+  | AiContinuationOptionsResponse
+  | { content: string; title: string };
+
+function isAiContinuationOption(option: unknown): option is AiContinuationOption {
+  if (typeof option !== 'object' || option === null) return false;
+  const candidate = option as { summary?: unknown };
+  return typeof candidate.summary === 'string' && candidate.summary.trim() !== '';
 }
 
-function isValidContinuationResponse(data: any): data is AiContinuationResponse {
-  return data &&
-    typeof data.title === 'string' && // Title can be empty initially, cleanExtractedText handles default
-    typeof data.content === 'string' && data.content.trim() !== '';
+// --- Validation functions for AI responses ---
+function isValidOptionsResponse(data: unknown): data is AiContinuationOptionsResponse {
+  if (typeof data !== 'object' || data === null) return false;
+  const candidate = data as { options?: unknown };
+  if (!Array.isArray(candidate.options)) return false;
+  return candidate.options.every(isAiContinuationOption);
+}
+
+function isValidContinuationResponse(data: unknown): data is AiContinuationResponse {
+  if (typeof data !== 'object' || data === null) return false;
+  const candidate = data as { title?: unknown; content?: unknown };
+  return typeof candidate.title === 'string' && // Title can be empty initially, cleanExtractedText handles default
+    typeof candidate.content === 'string' && candidate.content.trim() !== '';
 }
 
 
@@ -104,12 +144,13 @@ async function generateContinuationOptions(
     }
 
     // First try: Normal JSON parsing
-    let parsedResponse;
+    let parsedResponse: unknown;
     try {
       parsedResponse = JSON.parse(aiResponseContent);
       console.log(`[${functionVersion}] Options JSON parsed successfully on first try`);
     } catch (parseError) {
-      const errorMsg = parseError instanceof Error ? parseError.message : 'Unknown error';
+      const errorObj = asError(parseError);
+      const errorMsg = errorObj.message;
       console.error(`[${functionVersion}] Failed to parse options JSON${userId ? ` (User: ${userId})` : ''}. Error: ${errorMsg}. Trying aggressive cleaning...`);
       console.log(`[${functionVersion}] Problematic JSON (first 500 chars): ${aiResponseContent.substring(0, 500)}`);
       
@@ -129,7 +170,7 @@ async function generateContinuationOptions(
               .replace(/\t/g, '\\t');    // Tabs
             
             // Remove other control characters
-            fixedValue = fixedValue.split('').filter(char => {
+            fixedValue = fixedValue.split('').filter((char: string) => {
               const code = char.charCodeAt(0);
               return code >= 32 || code === 9 || code === 10 || code === 13;
             }).join('');
@@ -142,7 +183,7 @@ async function generateContinuationOptions(
         parsedResponse = JSON.parse(cleanedContent);
         console.log(`[${functionVersion}] Options JSON parsed successfully with aggressive cleaning`);
       } catch (fallbackError) {
-        const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : 'Unknown error';
+        const fallbackMsg = asError(fallbackError).message;
         console.error(`[${functionVersion}] Aggressive cleaning parsing also failed${userId ? ` (User: ${userId})` : ''}: ${fallbackMsg}`);
         console.error(`[${functionVersion}] Raw response that failed${userId ? ` (User: ${userId})` : ''}: ${aiResponseContent}`);
         throw new Error(`No se pudo parsear la respuesta JSON de opciones: ${errorMsg}`);
@@ -156,14 +197,20 @@ async function generateContinuationOptions(
     console.error(`[${functionVersion}] Formato de opciones inválido después de parsear. Data:`, parsedResponse);
     throw new Error("Formato de opciones inválido después de parsear el JSON de la IA.");
 
-  } catch (e: any) {
-    console.error(`[${functionVersion}] Error procesando la respuesta de la IA para las opciones: ${e.message}. Raw response: ${aiResponseContent?.substring(0, 500)}`, e);
+  } catch (error: unknown) {
+    const normalizedError = asError(error);
+    console.error(
+      `[${functionVersion}] Error procesando la respuesta de la IA para las opciones: ${normalizedError.message}. Raw response: ${aiResponseContent?.substring(0, 500)}`,
+      normalizedError,
+    );
     // Fallback
-    const defaultOptions = [
+    const defaultOptions: AiContinuationOption[] = [
       { summary: language.startsWith('en') ? "Continue the adventure" : "Continuar la aventura" },
       { summary: language.startsWith('en') ? "Explore something new" : "Explorar algo nuevo" },
       { summary: language.startsWith('en') ? "Meet a new friend" : "Encontrar un amigo" }
-    ].map(opt => ({ summary: `${opt.summary} (${language.startsWith('en') ? 'default option' : 'opción por defecto'})` }));
+    ].map((opt): AiContinuationOption => ({
+      summary: `${opt.summary} (${language.startsWith('en') ? 'default option' : 'opción por defecto'})`
+    }));
     return { options: defaultOptions };
   }
 }
@@ -234,43 +281,56 @@ serve(async (req: Request) => {
     userId = user.id;
     console.log(`[${functionVersion}] User Auth: ${userId}`);
 
-    let body: any;
+    let body: ContinuationRequestBody;
     try {
-      body = await req.json();
-      if (!body || typeof body !== 'object') throw new Error("Parsed body is not an object.");
-    } catch (error: any) {
-      console.error(`[${functionVersion}] Failed to parse JSON body for user ${userId}. Error:`, error);
-      throw new Error(`Invalid/empty JSON in body: ${error.message}.`);
+      const parsedBody = await req.json() as unknown;
+      if (!parsedBody || typeof parsedBody !== 'object') throw new Error("Parsed body is not an object.");
+      body = parsedBody as ContinuationRequestBody;
+    } catch (error: unknown) {
+      const parseError = asError(error);
+      console.error(`[${functionVersion}] Failed to parse JSON body for user ${userId}. Error:`, parseError);
+      throw new Error(`Invalid/empty JSON in body: ${parseError.message}.`);
     }
 
-    const { action, story, chapters = [], selectedOptionSummary, userDirection } = body;
-    requestedAction = action || 'unknown';
-    const story_id = story?.id;
+    const rawAction = body.action;
+    if (typeof rawAction !== 'string' || !rawAction.trim()) {
+      throw new Error("'action' es requerida.");
+    }
+    const action = rawAction;
+    requestedAction = action;
 
-    const isContinuationAction = ['freeContinuation', 'optionContinuation', 'directedContinuation'].includes(action);
+    const story = body.story;
+    const rawChapters = body.chapters;
+    if (rawChapters !== undefined && !Array.isArray(rawChapters)) {
+      throw new Error(`Array 'chapters' requerido (puede ser vacío) para la acción '${action}'.`);
+    }
+    const chapters = (Array.isArray(rawChapters) ? rawChapters : []) as Chapter[];
+    const { selectedOptionSummary, userDirection } = body;
+
+    const isContinuationAction = isContinuationActionType(action);
     const requiresStoryForContext = isContinuationAction || action === 'generateOptions';
 
     // Validaciones de entrada (largely same as v6.1)
-    if (!action) throw new Error("'action' es requerida.");
+    let validatedStory: Story | undefined;
     if (requiresStoryForContext) {
-      if (!story || typeof story !== 'object' || !story_id) {
+      if (!story || typeof story !== 'object' || typeof story.id !== 'string') {
         throw new Error(`Objeto 'story' (con 'id') inválido/ausente para la acción '${action}'.`);
       }
+      validatedStory = story;
+      const hasCharacterData = (story.options.characters && story.options.characters.length > 0) || (story.options as { character?: { name?: string } }).character?.name;
+      const hasContent = typeof story.content === 'string' && story.content.trim() !== '';
+      const hasTitle = typeof story.title === 'string' && story.title.trim() !== '';
       // Validate story has required content and at least one character
-      const hasCharacterData = (story.options.characters && story.options.characters.length > 0) || story.options.character?.name;
-      if (!story.content || !story.options || !hasCharacterData || !story.title) {
+      if (!hasContent || !story.options || !hasCharacterData || !hasTitle) {
         console.error("Story validation failed:", {
-          hasContent: !!story.content,
+          hasContent,
           hasOptions: !!story.options,
-          hasCharacterData: hasCharacterData,
-          hasTitle: !!story.title,
+          hasCharacterData,
+          hasTitle,
           charactersCount: story.options.characters?.length || 0,
           primaryCharacterName: story.options.characters?.[0]?.name
         });
         throw new Error("Datos incompletos en el objeto 'story' recibido (content, options con al menos un personaje, title son necesarios).");
-      }
-      if (!Array.isArray(chapters)) {
-        throw new Error(`Array 'chapters' requerido (puede ser vacío) para la acción '${action}'.`);
       }
     }
     if (action === 'optionContinuation' && (typeof selectedOptionSummary !== 'string' || !selectedOptionSummary.trim())) {
@@ -280,13 +340,24 @@ serve(async (req: Request) => {
       throw new Error("'userDirection' (string no vacío) requerido para 'directedContinuation'.");
     }
 
-    const language = body.language || story?.options?.language || 'Español';
-    const childAge = body.childAge || story?.options?.childAge || 7;
-    const specialNeed = body.specialNeed || story?.options?.specialNeed || 'Ninguna';
-    const storyDuration = body.storyDuration || story?.options?.duration || 'medium';
+    const baseStoryOptions = validatedStory?.options ?? story?.options;
+    const language = typeof body.language === 'string' && body.language.trim().length > 0
+      ? body.language
+      : (baseStoryOptions?.language ?? 'Español');
+    const childAge = typeof body.childAge === 'number' ? body.childAge : baseStoryOptions?.childAge || 7;
+    const specialNeed = typeof body.specialNeed === 'string' && body.specialNeed.trim().length > 0
+      ? body.specialNeed
+      : (baseStoryOptions?.specialNeed ?? 'Ninguna');
+    const storyDuration = typeof body.storyDuration === 'string' && body.storyDuration.trim().length > 0
+      ? body.storyDuration
+      : (baseStoryOptions?.duration ?? 'medium');
+    const storyId = validatedStory?.id;
 
     // Límites (largely same logic as v6.1)
     if (isContinuationAction) {
+      if (!storyId) {
+        throw new Error("Historia inválida para verificar límites de continuación.");
+      }
       const { data: profile, error: profileError } = await supabaseAdmin.from('profiles').select('subscription_status').eq('id', userId).maybeSingle();
       if (profileError) throw new Error("Error al verificar el perfil de usuario para límites.");
 
@@ -294,7 +365,7 @@ serve(async (req: Request) => {
       if (!isPremium) {
         const { count: chapterCount, error: countError } = await supabaseAdmin.from('story_chapters')
           .select('*', { count: 'exact', head: true })
-          .eq('story_id', story_id);
+          .eq('story_id', storyId);
         if (countError) throw new Error("Error al verificar límites de continuación.");
 
         const FREE_CHAPTER_LIMIT = 2; // Límite de capítulos *adicionales* generables (no se si el capitulo 0 lo cuenta)
@@ -307,21 +378,27 @@ serve(async (req: Request) => {
     }
 
     // --- Ejecutar Acción Principal ---
-    let responsePayload: any = {}; // Use 'any' for flexibility, or a union type
-    console.log(`[${functionVersion}] Executing action: ${action} for user ${userId}, story ${story_id || 'N/A'}`);
+    let responsePayload: ContinuationResponsePayload;
+    console.log(`[${functionVersion}] Executing action: ${action} for user ${userId}, story ${storyId || 'N/A'}`);
 
     if (action === 'generateOptions') {
-      const optionsResponse = await generateContinuationOptions(story as Story, chapters as Chapter[], language, childAge, specialNeed, userId || undefined);
-      responsePayload = optionsResponse; // This is already { options: [...] }
-    } else if (isContinuationAction) {
+      if (!validatedStory) {
+        throw new Error("Historia inválida para generar opciones de continuación.");
+      }
+      const optionsResponse = await generateContinuationOptions(validatedStory, chapters, language, childAge, specialNeed, userId || undefined);
+      responsePayload = optionsResponse;
+    } else if (isContinuationActionType(action)) {
+      if (!validatedStory) {
+        throw new Error("Historia inválida para generar una continuación.");
+      }
       const continuationContext: ContinuationContextType = {};
       if (action === 'optionContinuation') continuationContext.optionSummary = selectedOptionSummary;
       if (action === 'directedContinuation') continuationContext.userDirection = userDirection;
 
       const continuationPrompt = createContinuationPrompt(
-        action as 'freeContinuation' | 'optionContinuation' | 'directedContinuation',
-        story as Story,
-        chapters as Chapter[],
+        action,
+        validatedStory,
+        chapters,
         continuationContext,
         language,
         childAge,
@@ -371,7 +448,8 @@ serve(async (req: Request) => {
           console.warn(`[${functionVersion}] AI continuation response JSON structure invalid. Data:`, parsedResponse);
         }
       } catch (parseError) {
-        const errorMsg = parseError instanceof Error ? parseError.message : 'Unknown error';
+        const errorObj = asError(parseError);
+        const errorMsg = errorObj.message;
         console.error(`[${functionVersion}] Failed to parse JSON from AI continuation response${userId ? ` (User: ${userId})` : ''}. Error: ${errorMsg}. Trying aggressive cleaning...`);
         console.log(`[${functionVersion}] Problematic continuation JSON (first 500 chars): ${aiResponseContent.substring(0, 500)}`);
         
@@ -391,7 +469,7 @@ serve(async (req: Request) => {
                 .replace(/\t/g, '\\t');    // Tabs
               
               // Remove other control characters
-              fixedValue = fixedValue.split('').filter(char => {
+              fixedValue = fixedValue.split('').filter((char: string) => {
                 const code = char.charCodeAt(0);
                 return code >= 32 || code === 9 || code === 10 || code === 13;
               }).join('');
@@ -410,7 +488,7 @@ serve(async (req: Request) => {
             console.log(`[${functionVersion}] Parsed AI continuation JSON successfully with aggressive cleaning.`);
           }
         } catch (fallbackError) {
-          const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : 'Unknown error';
+          const fallbackMsg = asError(fallbackError).message;
           console.error(`[${functionVersion}] Aggressive cleaning parsing also failed${userId ? ` (User: ${userId})` : ''}: ${fallbackMsg}`);
           
           // Fallback 2: Manual extraction using more robust regex
@@ -453,7 +531,7 @@ serve(async (req: Request) => {
               console.error(`[${functionVersion}] Raw response that failed all parsing attempts${userId ? ` (User: ${userId})` : ''}: ${aiResponseContent}`);
             }
           } catch (regexError) {
-            const regexMsg = regexError instanceof Error ? regexError.message : 'Unknown error';
+            const regexMsg = asError(regexError).message;
             console.error(`[${functionVersion}] Regex extraction also failed${userId ? ` (User: ${userId})` : ''}: ${regexMsg}`);
             console.error(`[${functionVersion}] Complete raw response${userId ? ` (User: ${userId})` : ''}: ${aiResponseContent}`);
           }
@@ -483,10 +561,11 @@ serve(async (req: Request) => {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
 
-  } catch (error: any) {
-    console.error(`Error in ${functionVersion} (User: ${userId || 'UNKNOWN'}, Action: ${requestedAction}):`, error.message, error.stack);
+  } catch (error: unknown) {
+    const normalizedError = asError(error);
+    console.error(`Error in ${functionVersion} (User: ${userId || 'UNKNOWN'}, Action: ${requestedAction}):`, normalizedError.message, normalizedError.stack);
     let statusCode = 500;
-    const lowerMessage = error.message.toLowerCase();
+    const lowerMessage = normalizedError.message.toLowerCase();
 
     if (lowerMessage.includes("token inválido") || lowerMessage.includes("no autenticado")) statusCode = 401;
     else if (lowerMessage.includes("límite de continuaciones")) statusCode = 403;
@@ -494,7 +573,7 @@ serve(async (req: Request) => {
     else if (lowerMessage.includes("bloqueada por seguridad") || lowerMessage.includes("respuesta ia vacía") || lowerMessage.includes("filtro de contenido")) statusCode = 502;
     else if (lowerMessage.includes("acción no soportada")) statusCode = 400;
 
-    return new Response(JSON.stringify({ error: `Error procesando solicitud (${requestedAction}): ${error.message}` }), {
+    return new Response(JSON.stringify({ error: `Error procesando solicitud (${requestedAction}): ${normalizedError.message}` }), {
       status: statusCode, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }

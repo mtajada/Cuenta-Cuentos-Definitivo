@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "types": ["@types/deno"],
+    "strict": false,
+    "noEmit": true
+  },
+  "include": [
+    "./functions/**/*.ts",
+    "./scripts/**/*.ts",
+    "./functions/**/*.tsx",
+    "./types/**/*.d.ts"
+  ]
+}
