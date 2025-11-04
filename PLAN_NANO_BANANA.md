@@ -25,18 +25,18 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
 
 ## Fase 0 – Preparativos
 
-- [ ] Configurar variables de entorno
-  - [ ] Registrar `GEMINI_API_KEY` y `OPENAI_API_KEY` en todos los entornos.
-  - [ ] Definir `IMAGE_PROVIDER_DEFAULT=gemini` y `IMAGE_PROVIDER_FALLBACK=openai` para las Edge Functions, y exponer `VITE_IMAGE_PROVIDER_DEFAULT` / `VITE_IMAGE_PROVIDER_FALLBACK` en el frontend.
-  - [ ] Documentar las nuevas variables en `docs/EDGE_FUNCTIONS.md` y en el archivo de ejemplo de entorno que se comparta con el equipo.
-- [ ] Normalizar ratios y helper de layout
-  - [ ] Documentar preferencia por el lienzo 4:5, listar los `aspectRatio` realmente soportados por Gemini (`1:1`, `3:4`, `4:3`, `9:16`, etc.) y mantener una tabla de mapeo para degradar a la opción más cercana cuando `'4:5'` no esté disponible.
-  - [ ] Implementar helper compartido (`mapAspectRatio`) en `_shared/image-layout.ts` y reutilizarlo en frontend (`src/lib/image-layout.ts`) para traducir el ratio deseado al permitido.
-  - [ ] Mantener tabla de tamaños heredados para OpenAI (`1024x1536`, etc.) como fallback.
-  - [ ] Centralizar la definición del layout en `supabase/functions/_shared/image-layout.ts` (export común) y generar automáticamente la contraparte `src/lib/image-layout.ts` usando el mismo contenido para preservar los imports actuales (`@/` en frontend, rutas relativas en Edge Functions).
-- [ ] Validar dependencias compatibles con Deno
-  - [ ] Seleccionar librería WASM (`imagescript@1.3.0` desde `deno.land/x`) para redimensionado/centrado.
-  - [ ] Documentar en `docs/EDGE_FUNCTIONS.md` la prohibición de librerías Node nativas (`sharp`, `jimp`) y detallar uso de la librería elegida.
+- [x] Configurar variables de entorno
+  - [x] Registrar `GEMINI_API_KEY` y `OPENAI_API_KEY` en todos los entornos.
+  - [x] Definir `IMAGE_PROVIDER_DEFAULT=gemini` y `IMAGE_PROVIDER_FALLBACK=openai` para las Edge Functions, y exponer `VITE_IMAGE_PROVIDER_DEFAULT` / `VITE_IMAGE_PROVIDER_FALLBACK` en el frontend.
+  - [x] Documentar las nuevas variables en `docs/EDGE_FUNCTIONS.md` y en el archivo de ejemplo de entorno que se comparta con el equipo.
+- [x] Normalizar ratios y helper de layout
+  - [x] Documentar preferencia por el lienzo 4:5, listar los `aspectRatio` realmente soportados por Gemini (`1:1`, `3:4`, `4:3`, `9:16`, etc.) y mantener una tabla de mapeo para degradar a la opción más cercana cuando `'4:5'` no esté disponible.
+  - [x] Implementar helper compartido (`mapAspectRatio`) en `_shared/image-layout.ts` y reutilizarlo en frontend (`src/lib/image-layout.ts`) para traducir el ratio deseado al permitido.
+  - [x] Mantener tabla de tamaños heredados para OpenAI (`1024x1536`, etc.) como fallback.
+  - [x] Centralizar la definición del layout en `supabase/functions/_shared/image-layout.ts` (export común) y generar automáticamente la contraparte `src/lib/image-layout.ts` usando el mismo contenido para preservar los imports actuales (`@/` en frontend, rutas relativas en Edge Functions).
+- [x] Validar dependencias compatibles con Deno
+  - [x] Seleccionar librería WASM (`imagescript@1.3.0` desde `deno.land/x`) para redimensionado/centrado.
+  - [x] Documentar en `docs/EDGE_FUNCTIONS.md` la prohibición de librerías Node nativas (`sharp`, `jimp`) y detallar uso de la librería elegida.
 
 ---
 

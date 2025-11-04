@@ -23,15 +23,80 @@ calidad, permitiendo:
 
 ## Configuración
 
-Las funciones utilizan las siguientes variables de entorno:
+Las funciones utilizan las siguientes variables de entorno relevantes para IA e imágenes:
 
-- `GEMINI_API_KEY`: Clave para acceder a la API de Gemini de Google.
+- `GEMINI_API_KEY`: Clave para acceder a la API de Gemini de Google (generación de historias/imágenes).
+- `OPENAI_API_KEY`: Clave privada para acceder a los servicios de OpenAI (fallback de imágenes, TTS).
+- `IMAGE_PROVIDER_DEFAULT`: Proveedor gráfico principal. Para la iniciativa “Nano Banana” debe ser `gemini`.
+- `IMAGE_PROVIDER_FALLBACK`: Proveedor alternativo cuando ocurre un fallo. Mantener `openai`.
+
+> **Nota:** `IMAGE_PROVIDER_DEFAULT` y `IMAGE_PROVIDER_FALLBACK` se leen tanto en las Edge Functions como en el frontend (vía variables `VITE_IMAGE_PROVIDER_DEFAULT` y `VITE_IMAGE_PROVIDER_FALLBACK`) para alinear la UI con el backend.
 
 Para configurar las variables de entorno en Supabase:
 
 ```bash
-supabase secrets set GEMINI_API_KEY="tu-clave-api"
+supabase secrets set \
+  GEMINI_API_KEY="tu-clave-api" \
+  OPENAI_API_KEY="tu-clave-openai" \
+  IMAGE_PROVIDER_DEFAULT="gemini" \
+  IMAGE_PROVIDER_FALLBACK="openai"
 ```
+
+En desarrollo local, copia `.env.example` como `.env` y completa los valores. Asegúrate de definir los equivalentes `VITE_IMAGE_PROVIDER_DEFAULT` y `VITE_IMAGE_PROVIDER_FALLBACK` para que el frontend conozca el proveedor activo.
+
+## Layout y relaciones de aspecto
+
+- La iniciativa “Nano Banana” fija `aspectRatio: "4:5"` como preferencia para cualquier solicitud a Gemini. Esta proporción produce imágenes verticales ideales para portadas y escenas de los cuentos.
+- Gemini 2.5 Flash Image expone únicamente los ratios: `1:1`, `3:4`, `4:3`, `9:16` y `16:9`. Cuando `"4:5"` no esté disponible en la API, degradamos automáticamente al valor más cercano (`"3:4"`) manteniendo un lienzo vertical.
+- La resolución real que devuelve Gemini ronda los ~896×1152 px para escenas verticales. Registramos la resolución exacta en runtime para conservar metadatos coherentes.
+- Para el fallback de OpenAI mantenemos la tabla heredada de tamaños (`1024x1536`, `1024x1024`, `1792x1024`) y reutilizamos el helper compartido `mapAspectRatio` + `getImageLayout()` para normalizar al lienzo A4.
+
+| Ratio solicitado | Ratio Gemini efectivo | Tamaño OpenAI de fallback | Observaciones |
+|------------------|-----------------------|---------------------------|---------------|
+| `4:5` (preferido) | `3:4`                 | `1024x1536`               | Vertical, mantiene narrativa de portada/escena. |
+| `3:4`             | `3:4`                 | `1024x1536`               | Coincide con el fallback principal. |
+| `1:1`             | `1:1`                 | `1024x1024`               | Usar sólo para assets cuadrados especiales. |
+| `9:16`            | `9:16`                | `1024x1792`               | Escenas ultra-verticales (no preferidas). |
+| `4:3` / `16:9`    | `4:3` / `16:9`        | `1792x1024`               | Mantener horizontal para material secundario. |
+
+El helper `getImageLayout()` centraliza esta información y expone:
+
+- `desiredAspectRatio`: `"4:5"`
+- `resolvedAspectRatio`: ratio Gemini tras degradación.
+- `canvas`: Lienzo A4 @200 dpi (1654x2339 px) y márgenes seguros de 72 px.
+- `openaiFallbackSize`: tamaño recomendado para `gpt-image-1`.
+
+## Dependencias para normalización de imágenes
+
+- Se adopta **ImageScript** (`https://deno.land/x/imagescript@1.3.0`) como librería WASM compatible con Supabase Edge para escalar, centrar y exportar las ilustraciones.
+- Queda prohibido utilizar librerías nativas de Node como `sharp` o `jimp`, ya que no son compatibles con el entorno Edge (no hay binarios nativos disponibles).
+- Ejemplo de uso en Deno:
+
+```ts
+import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
+import { getImageLayout } from "../_shared/image-layout.ts"; // Ruta relativa desde la Edge Function
+
+const source = await Image.decode(imageBuffer);
+const { canvas, safeMarginPx } = getImageLayout();
+
+const innerWidth = canvas.width - safeMarginPx.left - safeMarginPx.right;
+const innerHeight = canvas.height - safeMarginPx.top - safeMarginPx.bottom;
+const resized = source.clone().contain(
+  innerWidth,
+  innerHeight,
+  Image.RESIZE_NEAREST_NEIGHBOR,
+);
+
+const composed = new Image(canvas.width, canvas.height);
+composed.fill(0xffffffff);
+const offsetX = Math.floor((canvas.width - resized.width) / 2);
+const offsetY = Math.floor((canvas.height - resized.height) / 2);
+composed.composite(resized, offsetX, offsetY);
+
+const jpeg = await composed.encodeJPEG(92); // Calidad recomendada
+```
+
+- La función `getImageLayout()` ayudará a calcular el lienzo destino, márgenes y tamaños mínimos; `mapAspectRatio()` permite reutilizar la lógica de degradación tanto en Edge Functions como en el frontend.
 
 ## Funciones Disponibles
 
