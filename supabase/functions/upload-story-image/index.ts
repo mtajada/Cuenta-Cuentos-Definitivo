@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -14,6 +14,13 @@ interface UploadImageRequest {
   storyId: string;
   chapterId?: string | null;
   providerUsed?: string;
+  fallbackUsed?: boolean;
+  latencyMs?: number | null;
+  originalResolution?: string | null;
+  finalResolution?: string | null;
+  resizedFrom?: string | null;
+  resizedTo?: string | null;
+  userId?: string | null;
 }
 
 const VALID_IMAGE_TYPES = new Set(['cover', 'scene_1', 'scene_2', 'scene_3', 'scene_4', 'closing', 'character']);
@@ -50,6 +57,97 @@ function buildStoragePath(storyId: string, chapterId: string | null, imageType: 
     return `${sanitizedStoryId}/${chapterId.trim()}/${sanitizedImageType}.${extension}`;
   }
   return `${sanitizedStoryId}/${sanitizedImageType}.${extension}`;
+}
+
+type StoryImageMetadataPayload = {
+  storyId: string;
+  chapterId: string | null;
+  imageType: string;
+  storagePath: string;
+  provider: string;
+  fallbackUsed: boolean;
+  mimeType: string;
+  originalResolution?: string | null;
+  finalResolution?: string | null;
+  resizedFrom?: string | null;
+  resizedTo?: string | null;
+  latencyMs?: number | null;
+  userId: string;
+};
+
+function isValidUuid(value: string | null | undefined): value is string {
+  if (!value) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function normalizeChapterIdForMetadata(chapterId: string | null, storyId: string): string | null {
+  if (!chapterId || !isValidUuid(chapterId)) {
+    return null;
+  }
+  return chapterId === storyId ? null : chapterId;
+}
+
+async function upsertStoryImageMetadata(
+  supabaseAdmin: SupabaseClient,
+  payload: StoryImageMetadataPayload
+): Promise<void> {
+  const normalizedChapterId = normalizeChapterIdForMetadata(payload.chapterId, payload.storyId);
+
+  const insertPayload = {
+    story_id: payload.storyId,
+    chapter_id: normalizedChapterId,
+    image_type: payload.imageType,
+    storage_path: payload.storagePath,
+    provider: payload.provider,
+    fallback_used: payload.fallbackUsed,
+    mime_type: payload.mimeType,
+    original_resolution: payload.originalResolution ?? null,
+    final_resolution: payload.finalResolution ?? null,
+    resized_from: payload.resizedFrom ?? null,
+    resized_to: payload.resizedTo ?? null,
+    latency_ms: typeof payload.latencyMs === 'number' ? payload.latencyMs : null,
+    user_id: payload.userId,
+  };
+
+  const { error: insertError } = await supabaseAdmin.from('story_images').insert(insertPayload);
+  if (!insertError) {
+    return;
+  }
+
+  if (insertError.code !== '23505') {
+    console.error('[UPLOAD_STORY_IMAGE] Failed to insert story_images metadata:', insertError);
+    if (insertError.code === '23503' && normalizedChapterId !== null) {
+      console.warn('[UPLOAD_STORY_IMAGE] Retrying metadata insert with null chapter_id due to FK violation');
+      const retryPayload = { ...insertPayload, chapter_id: null };
+      const { error: retryError } = await supabaseAdmin.from('story_images').insert(retryPayload);
+      if (!retryError || retryError.code === '23505') {
+        return;
+      }
+      if (retryError) {
+        console.error('[UPLOAD_STORY_IMAGE] Retry insert failed for story_images metadata:', retryError);
+      }
+    }
+    return;
+  }
+
+  const updatePayload = { ...insertPayload };
+
+  const query = supabaseAdmin
+    .from('story_images')
+    .update(updatePayload)
+    .eq('story_id', payload.storyId)
+    .eq('image_type', payload.imageType);
+
+  if (normalizedChapterId === null) {
+    query.is('chapter_id', null);
+  } else {
+    query.eq('chapter_id', normalizedChapterId);
+  }
+
+  const { error: updateError } = await query;
+  if (updateError) {
+    console.error('[UPLOAD_STORY_IMAGE] Failed to update story_images metadata after conflict:', updateError);
+  }
 }
 
 serve(async (req: Request) => {
@@ -92,6 +190,24 @@ serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
     );
 
+    let effectiveUserId = body.userId ?? null;
+    if (!effectiveUserId) {
+      const authHeader = req.headers.get('Authorization');
+      if (authHeader?.startsWith('Bearer ')) {
+        const token = authHeader.replace('Bearer ', '');
+        const {
+          data: { user },
+          error: authError,
+        } = await supabaseAdmin.auth.getUser(token);
+        if (user && !authError) {
+          effectiveUserId = user.id;
+          console.log('[UPLOAD_STORY_IMAGE] Resolved user from Authorization header:', effectiveUserId);
+        } else if (authError) {
+          console.warn('[UPLOAD_STORY_IMAGE] Unable to resolve user from token:', authError.message ?? authError);
+        }
+      }
+    }
+
     let imageBuffer: Uint8Array;
 
     if (imageBase64) {
@@ -130,6 +246,31 @@ serve(async (req: Request) => {
     }
 
     console.log('[UPLOAD_STORY_IMAGE] Upload successful:', uploadData);
+
+    if (effectiveUserId) {
+      try {
+        await upsertStoryImageMetadata(supabaseAdmin, {
+          storyId,
+          chapterId: normalizedChapterId,
+          imageType,
+          storagePath,
+          provider: providerUsed ?? 'manual_upload',
+          fallbackUsed: Boolean(body.fallbackUsed),
+          mimeType: contentType,
+          originalResolution: body.originalResolution ?? null,
+          finalResolution: body.finalResolution ?? null,
+          resizedFrom: body.resizedFrom ?? null,
+          resizedTo: body.resizedTo ?? null,
+          latencyMs: typeof body.latencyMs === 'number' ? body.latencyMs : null,
+          userId: effectiveUserId,
+        });
+        console.log('[UPLOAD_STORY_IMAGE] Metadata persisted in story_images');
+      } catch (metadataError) {
+        console.error('[UPLOAD_STORY_IMAGE] Failed to persist metadata:', metadataError);
+      }
+    } else {
+      console.warn('[UPLOAD_STORY_IMAGE] Skipping metadata persistence because user ID is unavailable');
+    }
 
     const { data: urlData } = supabaseAdmin.storage.from('images-stories').getPublicUrl(storagePath);
     const publicUrl = urlData.publicUrl;

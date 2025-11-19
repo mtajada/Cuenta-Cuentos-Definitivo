@@ -98,6 +98,38 @@ const jpeg = await composed.encodeJPEG(92); // Calidad recomendada
 
 - La función `getImageLayout()` ayudará a calcular el lienzo destino, márgenes y tamaños mínimos; `mapAspectRatio()` permite reutilizar la lógica de degradación tanto en Edge Functions como en el frontend.
 
+## Pipeline de ilustraciones (Gemini → normalización → OpenAI fallback)
+
+1. **Solicitud inicial a Gemini (`generate-image/providers.ts`)**
+   - Se normaliza el `desiredAspectRatio` mediante `mapAspectRatio`.
+   - Se envía la petición con `responseModalities: ['Image']` y se mide la latencia.
+2. **Fallback automático a OpenAI**
+   - Si Gemini falla por error técnico o respuesta vacía, se invoca `generateWithOpenAI` con los tamaños heredados (`1024x1792`, etc.).
+   - Se marca `fallbackUsed=true` cuando la imagen final proviene de OpenAI.
+3. **Normalización A4 unificada**
+   - Independientemente del proveedor, el buffer pasa por `normalizeForLayout()` (ImageScript) para generar un lienzo A4 @200 dpi con fondo blanco y exportarlo a JPEG (calidad 92).
+   - Se calculan y retornan `originalResolution`, `resizedFrom`, `resizedTo` y `finalResolution` para análisis posterior.
+4. **Persistencia y metadatos**
+   - El asset normalizado se sube al bucket `images-stories` usando la Edge Function `upload-story-image` (`storyId[/chapterId]/imageType.jpeg`).
+   - Se registra un entry en `public.story_images` con la traza completa (proveedor, fallback, resoluciones, latencia, storage path y usuario propietario).
+
+> El script `supabase/scripts/backfill-images-stories.ts` reutiliza exactamente la misma rutina de normalización para migrar assets legacy desde `story-images`.
+
+### Metadatos en `public.story_images`
+
+Cada ilustración almacenada incluye los siguientes campos clave:
+
+- `story_id`, `chapter_id`, `image_type`: identifican de forma única la ilustración.
+- `storage_path`: ruta relativa en `images-stories` (siempre `.jpeg` tras normalización).
+- `provider`: `gemini`, `openai` o `legacy` (para backfill).
+- `fallback_used`: indica si se usó el proveedor alternativo.
+- `mime_type`: siempre `image/jpeg` después de la normalización.
+- `original_resolution`, `resized_from`, `resized_to`, `final_resolution`: strings `ancho×alto` que documentan el proceso.
+- `latency_ms`: tiempo de respuesta del proveedor activo.
+- `user_id`: propietario final del recurso (para cumplir con RLS).
+
+El índice único `uniq_story_images` evita duplicados por combinación `story_id` + `chapter_id` + `image_type`. Las políticas RLS permiten lecturas a dueños de la historia y escrituras exclusivas al `service_role`.
+
 ## Funciones Disponibles
 
 ### generate-story

@@ -155,15 +155,15 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
 ## Fase 3 – Persistencia y limpieza
 
 - [ ] Ejecutar backfill en `images-stories`
-  - [ ] Reconvertir las imágenes existentes en `story-images` a JPEG mediante la misma rutina de normalización antes de moverlas y renombrarlas a `.jpeg`.
-  - [ ] Registrar metadatos (`mimeType`, `originalResolution`, `finalResolution`, `storagePath`) para ilustraciones históricas.
-  - [ ] Actualizar la Edge Function `generate-illustrated-pdf` y cualquier script que lea `story-images/*.png` para que utilicen `images-stories` y las nuevas rutas `.jpeg` antes del backfill.
+  - [x] Reconvertir las imágenes existentes en `story-images` a JPEG mediante la misma rutina de normalización antes de moverlas y renombrarlas a `.jpeg`.
+  - [x] Registrar metadatos (`mimeType`, `originalResolution`, `finalResolution`, `storagePath`) para ilustraciones históricas.
+  - [x] Actualizar la Edge Function `generate-illustrated-pdf` y cualquier script que lea `story-images/*.png` para que utilicen `images-stories` y las nuevas rutas `.jpeg` antes del backfill.
 - [ ] Actualizar documentación clave
-  - [ ] Revisar `docs/ADMIN_ILLUSTRATED_PDF_PANEL.md` incorporando nuevo flujo y métricas.
-  - [ ] Actualizar `docs/EDGE_FUNCTIONS.md` detallando el pipeline Gemini→normalización→OpenAI fallback, la librería de normalización elegida y la estructura de metadatos almacenados.
+  - [x] Revisar `docs/ADMIN_ILLUSTRATED_PDF_PANEL.md` incorporando nuevo flujo y métricas.
+  - [x] Actualizar `docs/EDGE_FUNCTIONS.md` detallando el pipeline Gemini→normalización→OpenAI fallback, la librería de normalización elegida y la estructura de metadatos almacenados.
 - [ ] Depurar referencias legacy
-  - [ ] Reemplazar cualquier uso del bucket `story-images` por `images-stories` (incluyendo `generate-illustrated-pdf` y scripts asociados).
-  - [ ] Eliminar flujos que descargaban imágenes desde el frontend en lugar de usar URLs públicas normalizadas.
+  - [x] Reemplazar cualquier uso del bucket `story-images` por `images-stories` (incluyendo `generate-illustrated-pdf` y scripts asociados).
+  - [x] Eliminar flujos que descargaban imágenes desde el frontend en lugar de usar URLs públicas normalizadas.
 
 ---
 

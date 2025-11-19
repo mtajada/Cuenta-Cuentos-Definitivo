@@ -257,6 +257,13 @@ serve(async (req: Request) => {
             storyId,
             chapterId: chapterId ?? null,
             providerUsed: providerResult.provider,
+            fallbackUsed,
+            latencyMs: providerResult.latencyMs,
+            originalResolution: formatResolution(normalized.originalResolution),
+            finalResolution: formatResolution(normalized.finalResolution),
+            resizedFrom: formatResolution(normalized.resizedFrom ?? null),
+            resizedTo: formatResolution(normalized.resizedTo ?? null),
+            userId,
           },
         });
 

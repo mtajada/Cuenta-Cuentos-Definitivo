@@ -124,7 +124,7 @@ La Edge Function usa `service_role` key que tiene permisos totales:
    ↓
 5. Usuario selecciona capítulo
    ↓
-6. StoryPdfService valida imágenes existentes
+6. StoryPdfService consulta `public.story_images` y valida ilustraciones normalizadas (`images-stories/*.jpeg`)
    ↓
 7. Si faltan imágenes → ImageGenerationService genera con IA
    ↓
@@ -132,6 +132,14 @@ La Edge Function usa `service_role` key que tiene permisos totales:
    ↓
 9. PDF se descarga automáticamente
 ```
+
+## 📈 Métricas del panel
+
+- **Proveedor y fallback**: El panel muestra `providerUsed` y `fallbackUsed` por ilustración (origen `public.story_images`).
+- **Resoluciones**: Se exponen `originalResolution`, `resizedFrom`, `resizedTo` y `finalResolution` para auditar la normalización A4.
+- **Latencia**: `latencyMs` permite monitorear tiempos de Gemini vs OpenAI.
+- **Rutas normalizadas**: Se listan `storagePath` y la URL pública resultante (`images-stories/.../*.jpeg`) para depurar errores rápidamente.
+- **Cobertura completa**: El validador exige seis imágenes (`cover`, `scene_1` … `scene_4`, `closing`) antes de permitir la generación del PDF.
 
 ## 🛠️ Mantenimiento
 
@@ -169,6 +177,27 @@ Si necesitas más datos de la historia:
 1. Actualiza el SELECT en la Edge Function
 2. Actualiza el tipo `StoryWithChapters` en `src/types/index.ts`
 3. Actualiza el mapeo en `AdminIllustratedPdfPanel.tsx`
+
+### Backfill de ilustraciones legacy
+
+Cuando existan recursos antiguos en `story-images`, utiliza el script Deno `supabase/scripts/backfill-images-stories.ts`:
+
+1. Exporta credenciales: `export SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=...`
+2. Ejecuta un dry-run para validar el alcance:
+
+   ```bash
+   deno run --allow-env --allow-net --allow-read supabase/scripts/backfill-images-stories.ts
+   ```
+
+3. Si todo es correcto, aplica los cambios:
+
+   ```bash
+   BACKFILL_APPLY=true deno run --allow-env --allow-net --allow-read supabase/scripts/backfill-images-stories.ts
+   ```
+
+4. Para eliminar los assets legacy una vez migrados agrega `BACKFILL_DELETE_SOURCE=true`.
+
+El script reconvierte las imágenes con la rutina oficial de normalización, las sube como `.jpeg` al bucket `images-stories` y registra metadatos en `public.story_images`.
 
 ## 🐛 Troubleshooting
 
@@ -210,7 +239,8 @@ Si necesitas más datos de la historia:
 
 - El panel no requiere autenticación de Supabase (solo código interno)
 - Puede acceder a historias de cualquier usuario
-- Las imágenes generadas se guardan en el bucket `images-stories`
+- Las ilustraciones se almacenan como `.jpeg` normalizados en el bucket `images-stories`
+- Los metadatos viven en `public.story_images` y deben mantenerse sincronizados con los assets
 - Los PDFs no se guardan, solo se descargan
 - El progreso se muestra en tiempo real durante la generación
 
@@ -219,4 +249,3 @@ Si necesitas más datos de la historia:
 - **Supabase Dashboard**: https://supabase.com/dashboard/project/vljseinehlxrvlghxcyk
 - **Edge Functions**: https://supabase.com/dashboard/project/vljseinehlxrvlghxcyk/functions
 - **Logs**: Supabase Dashboard → Functions → admin-get-story → Logs
-

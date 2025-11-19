@@ -4,6 +4,8 @@ import { supabase } from '@/supabaseClient';
 import { StoryScenes } from '@/types';
 import { getImageProviderConfig, ImageProviderConfig, ImageProviderId } from './imageProviderConfig';
 
+type ImageProviderUsed = 'gemini' | 'openai' | 'manual_upload' | 'normalized_storage' | 'legacy_storage';
+
 type ImageType = (typeof IMAGES_TYPE)[keyof typeof IMAGES_TYPE];
 
 interface ImageGenerationOptions {
@@ -13,7 +15,7 @@ interface ImageGenerationOptions {
 }
 
 export interface GeneratedImageMetadata {
-  providerUsed?: 'gemini' | 'openai';
+  providerUsed?: ImageProviderUsed;
   fallbackUsed?: boolean;
   latencyMs?: number;
   requestedAspectRatio?: string | null;
@@ -56,7 +58,7 @@ interface ImageGenerationResult {
 }
 
 interface EdgeFunctionMetadata {
-  providerUsed?: 'gemini' | 'openai';
+  providerUsed?: ImageProviderUsed;
   fallbackUsed?: boolean;
   latencyMs?: number;
   requestedAspectRatio?: string | null;
@@ -78,7 +80,7 @@ interface EdgeFunctionResponse {
   publicUrl?: string | null;
   storagePath?: string | null;
   metadata?: EdgeFunctionMetadata | null;
-  providerUsed?: 'gemini' | 'openai';
+  providerUsed?: ImageProviderUsed;
   fallbackUsed?: boolean;
   latencyMs?: number;
   imageBase64?: string | null;

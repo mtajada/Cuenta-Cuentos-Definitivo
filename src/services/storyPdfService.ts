@@ -103,7 +103,8 @@ interface CompleteIllustratedPdfOptions extends StoryPdfGenerationOptions {
 export class StoryPdfService {
   private static readonly REQUIRED_IMAGES = [IMAGES_TYPE.COVER, IMAGES_TYPE.SCENE_1, IMAGES_TYPE.SCENE_2, IMAGES_TYPE.SCENE_3, IMAGES_TYPE.SCENE_4, IMAGES_TYPE.CLOSING];
   private static readonly IMAGE_BUCKET = 'images-stories';
-  private static readonly LEGACY_IMAGE_EXTENSIONS = ['jpeg', 'jpg', 'png', 'webp'];
+  private static readonly LEGACY_IMAGE_BUCKET = 'story-images';
+  private static readonly FALLBACK_EXTENSIONS = ['jpeg', 'jpg', 'png', 'webp'];
   
   // TEMPORARY: Development mode to use local preview images
   // TODO: Set to false when ready for production
@@ -163,66 +164,16 @@ export class StoryPdfService {
 
         if (!selectedRecord) {
           console.log(`[StoryPdfService] ❌ No metadata for ${imageType}`);
-        } else if (!selectedRecord.storage_path) {
-          console.log(`[StoryPdfService] ❌ Metadata for ${imageType} is missing storage_path`);
         } else {
-          const { data: publicUrlData } = supabase.storage
-            .from(this.IMAGE_BUCKET)
-            .getPublicUrl(selectedRecord.storage_path);
-
-          const publicUrl = publicUrlData?.publicUrl;
-          if (!publicUrl) {
-            console.log(`[StoryPdfService] ❌ Unable to resolve public URL for ${imageType} using metadata path ${selectedRecord.storage_path}`);
-          } else {
-            let urlAvailable = false;
-            try {
-              const response = await fetch(publicUrl, { method: 'HEAD' });
-              if (response.ok) {
-                urlAvailable = true;
-              } else {
-                console.warn(
-                  `[StoryPdfService] ❌ HEAD check for ${imageType} at ${selectedRecord.storage_path} returned ${response.status}`
-                );
-              }
-            } catch (error) {
-              console.warn(
-                `[StoryPdfService] ❌ HEAD request failed for ${imageType} at ${selectedRecord.storage_path}`,
-                error
-              );
-            }
-
-            if (!urlAvailable) {
-              console.log(
-                `[StoryPdfService] ❌ Storage object unavailable for ${imageType} despite metadata entry ${selectedRecord.storage_path}`
-              );
-            } else {
-              detail = {
-                publicUrl,
-                providerUsed: (selectedRecord.provider ?? undefined) as GeneratedImageMetadata['providerUsed'],
-                fallbackUsed: Boolean(selectedRecord.fallback_used),
-                latencyMs: typeof selectedRecord.latency_ms === 'number' ? selectedRecord.latency_ms : undefined,
-                requestedAspectRatio: undefined,
-                effectiveAspectRatio: undefined,
-                requestSize: undefined,
-                originalResolution: selectedRecord.original_resolution ?? undefined,
-                finalResolution: selectedRecord.final_resolution ?? undefined,
-                resizedFrom: selectedRecord.resized_from ?? undefined,
-                resizedTo: selectedRecord.resized_to ?? undefined,
-                mimeType: selectedRecord.mime_type ?? undefined,
-                storagePath: selectedRecord.storage_path ?? undefined,
-                storyId,
-                chapterId: selectedRecord.chapter_id ?? undefined,
-                imageType,
-              };
-            }
-          }
+          detail = await this.buildDetailFromMetadataRecord(selectedRecord, storyId, imageType);
         }
 
         if (!detail) {
-          const legacyDetail = await this.tryLegacyStorageFallback(storyId, normalizedChapterId, imageType);
-          if (legacyDetail) {
-            detail = legacyDetail;
-          }
+          detail = await this.tryLegacyStorageFallback({
+            storyId,
+            chapterId: normalizedChapterId,
+            imageType,
+          });
         }
 
         if (!detail) {
@@ -487,65 +438,152 @@ export class StoryPdfService {
     return Array.isArray(data) ? data : [];
   }
 
-  private static async tryLegacyStorageFallback(
+  private static normalizeProvider(provider: string | null | undefined): GeneratedImageMetadata['providerUsed'] | undefined {
+    if (!provider) {
+      return undefined;
+    }
+
+    const normalized = provider.trim().toLowerCase();
+    if (normalized === 'gemini' || normalized === 'openai') {
+      return normalized;
+    }
+    if (normalized === 'manual_upload') {
+      return 'manual_upload';
+    }
+    if (normalized === 'legacy_storage' || normalized === 'storage_legacy') {
+      return 'legacy_storage';
+    }
+    if (normalized === 'normalized_storage' || normalized === 'storage_normalized') {
+      return 'normalized_storage';
+    }
+    return undefined;
+  }
+
+  private static async buildDetailFromMetadataRecord(
+    record: StoryImageMetadataRecord,
     storyId: string,
-    chapterId: string | undefined,
     imageType: string
   ): Promise<StoryImageValidationDetail | null> {
-    const cleanedChapterId = typeof chapterId === 'string' && chapterId.trim().length > 0 ? chapterId.trim() : undefined;
-    const basePaths = new Set<string>();
-
-    if (cleanedChapterId) {
-      basePaths.add(`${storyId}/${cleanedChapterId}`);
+    if (!record.storage_path) {
+      console.log(`[StoryPdfService] ❌ Metadata for ${imageType} is missing storage_path`);
+      return null;
     }
-    basePaths.add(storyId);
 
-    for (const basePath of basePaths) {
-      for (const extension of this.LEGACY_IMAGE_EXTENSIONS) {
-        const storagePath = `${basePath}/${imageType}.${extension}`;
-        const { data: publicUrlData } = supabase.storage
-          .from(this.IMAGE_BUCKET)
-          .getPublicUrl(storagePath);
+    const publicUrl = await this.resolveStoragePublicUrl(this.IMAGE_BUCKET, record.storage_path, imageType, 'metadata');
+    if (!publicUrl) {
+      console.log(
+        `[StoryPdfService] ❌ Storage object unavailable for ${imageType} despite metadata entry ${record.storage_path}`
+      );
+      return null;
+    }
 
-        const publicUrl = publicUrlData?.publicUrl;
-        if (!publicUrl) {
-          continue;
-        }
+    return {
+      publicUrl,
+      providerUsed: this.normalizeProvider(record.provider),
+      fallbackUsed: Boolean(record.fallback_used),
+      latencyMs: typeof record.latency_ms === 'number' ? record.latency_ms : undefined,
+      requestedAspectRatio: undefined,
+      effectiveAspectRatio: undefined,
+      requestSize: undefined,
+      originalResolution: record.original_resolution ?? undefined,
+      finalResolution: record.final_resolution ?? undefined,
+      resizedFrom: record.resized_from ?? undefined,
+      resizedTo: record.resized_to ?? undefined,
+      mimeType: record.mime_type ?? undefined,
+      storagePath: record.storage_path ?? undefined,
+      storyId,
+      chapterId: record.chapter_id ?? undefined,
+      imageType,
+    };
+  }
 
-        try {
-          const response = await fetch(publicUrl, { method: 'HEAD' });
-          if (!response.ok) {
+  private static async resolveStoragePublicUrl(
+    bucket: string,
+    storagePath: string,
+    imageType: string,
+    source: 'metadata' | 'fallback'
+  ): Promise<string | null> {
+    const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(storagePath);
+    const publicUrl = publicUrlData?.publicUrl;
+    if (!publicUrl) {
+      console.log(
+        `[StoryPdfService] ❌ Unable to resolve public URL for ${imageType} using ${source} path ${storagePath}`
+      );
+      return null;
+    }
+
+    try {
+      const response = await fetch(publicUrl, { method: 'HEAD' });
+      if (response.ok) {
+        return publicUrl;
+      }
+
+      console.warn(
+        `[StoryPdfService] ❌ HEAD check for ${imageType} at ${storagePath} (${bucket}) returned ${response.status}`
+      );
+      return null;
+    } catch (error) {
+      console.warn(
+        `[StoryPdfService] ❌ HEAD request failed for ${imageType} at ${storagePath} (${bucket})`,
+        error
+      );
+      return null;
+    }
+  }
+
+  private static async tryLegacyStorageFallback(options: {
+    storyId: string;
+    chapterId?: string;
+    imageType: string;
+  }): Promise<StoryImageValidationDetail | null> {
+    const storyId = options.storyId?.trim();
+    if (!storyId) {
+      return null;
+    }
+
+    const normalizedChapterId = options.chapterId && options.chapterId.trim().length > 0 ? options.chapterId.trim() : undefined;
+    const basePaths = normalizedChapterId ? [`${storyId}/${normalizedChapterId}`, storyId] : [storyId];
+    const buckets: Array<{ name: string; provider: GeneratedImageMetadata['providerUsed'] }> = [
+      { name: this.IMAGE_BUCKET, provider: 'normalized_storage' },
+      { name: this.LEGACY_IMAGE_BUCKET, provider: 'legacy_storage' },
+    ];
+
+    for (const { name, provider } of buckets) {
+      for (const base of basePaths) {
+        for (const extension of this.FALLBACK_EXTENSIONS) {
+          const storagePath = `${base}/${options.imageType}.${extension}`;
+          const publicUrl = await this.resolveStoragePublicUrl(name, storagePath, options.imageType, 'fallback');
+          if (!publicUrl) {
             continue;
           }
-        } catch (error) {
-          console.warn(`[StoryPdfService] Legacy fallback HEAD failed for ${storagePath}`, error);
-          continue;
+
+          console.log(
+            `[StoryPdfService] 🔄 Using ${provider === 'legacy_storage' ? 'legacy' : 'normalized'} storage fallback for ${options.imageType} at ${name}/${storagePath}`
+          );
+
+          return {
+            publicUrl,
+            providerUsed: provider,
+            fallbackUsed: true,
+            latencyMs: undefined,
+            requestedAspectRatio: undefined,
+            effectiveAspectRatio: undefined,
+            requestSize: undefined,
+            originalResolution: undefined,
+            finalResolution: undefined,
+            resizedFrom: undefined,
+            resizedTo: undefined,
+            mimeType: undefined,
+            storagePath,
+            storyId,
+            chapterId: normalizedChapterId,
+            imageType: options.imageType,
+          };
         }
-
-        console.log(`[StoryPdfService] 🔁 Using legacy storage fallback for ${imageType}: ${storagePath}`);
-
-        return {
-          publicUrl,
-          providerUsed: undefined,
-          fallbackUsed: true,
-          latencyMs: undefined,
-          requestedAspectRatio: undefined,
-          effectiveAspectRatio: undefined,
-          requestSize: undefined,
-          originalResolution: undefined,
-          finalResolution: undefined,
-          resizedFrom: undefined,
-          resizedTo: undefined,
-          mimeType: undefined,
-          storagePath,
-          storyId,
-          chapterId: cleanedChapterId,
-          imageType,
-        };
       }
     }
 
-    console.log(`[StoryPdfService] ❌ Legacy fallback could not locate ${imageType}`);
+    console.log(`[StoryPdfService] ❌ No storage fallback available for ${options.imageType}`);
     return null;
   }
 
