@@ -109,6 +109,30 @@ FOR DELETE
 TO authenticated
 USING (auth.uid() IN (SELECT stories.user_id FROM public.stories WHERE stories.id = story_chapters.story_id));
 
+-- Políticas para la tabla story_images (ratios/proveedores en docs/EDGE_FUNCTIONS.md)
+ALTER TABLE public.story_images ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their story images"
+ON public.story_images
+FOR SELECT
+USING (
+  auth.uid() = user_id
+  OR EXISTS (
+    SELECT 1 FROM public.stories s WHERE s.id = story_id AND s.user_id = auth.uid()
+  )
+);
+
+CREATE POLICY "Service role can insert story images"
+ON public.story_images
+FOR INSERT
+WITH CHECK (auth.jwt() ->> 'role' = 'service_role');
+
+CREATE POLICY "Service role can update story images"
+ON public.story_images
+FOR UPDATE
+USING (auth.jwt() ->> 'role' = 'service_role')
+WITH CHECK (auth.jwt() ->> 'role' = 'service_role');
+
 -- Políticas para la tabla challenges
 CREATE POLICY "Los usuarios pueden ver desafíos de sus historias"
 ON public.challenges

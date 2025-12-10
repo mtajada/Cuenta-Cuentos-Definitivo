@@ -6,10 +6,13 @@
  * @param title Story title
  * @param content Full story content
  * @param language Story language
+ * @param imageStyleDescriptor Prompt descriptor for the selected illustration style
  * @returns Prompt string that instructs AI to generate only the scenes object
  */
-export function createScenesPrompt(title: string, content: string, language: string): string {
+export function createScenesPrompt(title: string, content: string, language: string, imageStyleDescriptor: string): string {
   console.log(`[ScenesPrompt] Creating prompt for: "${title}" (${language}), content length: ${content.length}`);
+  const styleDescriptor = imageStyleDescriptor?.trim() || 'acuarela suave con paleta pastel, bordes difuminados y texturas de papel, estética amable para niños';
+  const stylePrefix = styleDescriptor.endsWith('.') ? styleDescriptor : `${styleDescriptor}.`;
 
   let prompt = `**ANÁLISIS DE CUENTO EXISTENTE Y GENERACIÓN DE PROMPTS VISUALES**\n\n`;
   
@@ -22,7 +25,7 @@ export function createScenesPrompt(title: string, content: string, language: str
   prompt += `---\n\n`;
   
   prompt += `**TU TAREA:**\n`;
-  prompt += `Debes analizar el cuento anterior y generar un objeto JSON con prompts detallados para generar 6 imágenes en estilo acuarela tradicional infantil.\n\n`;
+  prompt += `Debes analizar el cuento anterior y generar un objeto JSON con prompts detallados para 6 imágenes usando este estilo visual: ${styleDescriptor}.\n\n`;
   
   prompt += `**INSTRUCCIONES DE ANÁLISIS:**\n`;
   prompt += `1. Lee atentamente el cuento completo\n`;
@@ -75,7 +78,7 @@ export function createScenesPrompt(title: string, content: string, language: str
   prompt += `**INSTRUCCIONES PARA CADA PROMPT DE ESCENA:**\n`;
   prompt += `Cada prompt (cover, scene_1-4, closing) DEBE:\n\n`;
   
-  prompt += `1. **Comenzar siempre con:** "Estilo acuarela tradicional infantil, colores suaves y cálidos, bordes difuminados, paleta pasteles."\n\n`;
+  prompt += `1. **Comenzar siempre con:** "${stylePrefix}"\n\n`;
   
   prompt += `2. **Incluir la descripción COMPLETA de "character"** para mantener consistencia visual\n\n`;
   
@@ -100,7 +103,7 @@ export function createScenesPrompt(title: string, content: string, language: str
   prompt += `4. Escenario relacionado con el final del cuento\n`;
   prompt += `5. Atmósfera de despedida, conclusión, esperanza\n\n`;
   
-  prompt += `Ejemplo closing: "Estilo acuarela tradicional infantil. [Descripción completa del personaje]. Vista de espaldas, la niña camina alejándose hacia el horizonte del bosque. Se ve claramente su vestido azul claro y su corona de flores desde atrás. El sol está poniéndose, creando un ambiente cálido de despedida. Atmósfera de paz y nuevas aventuras."\n\n`;
+  prompt += `Ejemplo closing: "${stylePrefix} [Descripción completa del personaje]. Vista de espaldas, la niña camina alejándose hacia el horizonte del bosque. Se ve claramente su vestido azul claro y su corona de flores desde atrás. El sol está poniéndose, creando un ambiente cálido de despedida. Atmósfera de paz y nuevas aventuras."\n\n`;
   
   prompt += `**RECORDATORIOS CRÍTICOS:**\n`;
   prompt += `- Escapa correctamente caracteres JSON: \\n para saltos de línea, \\" para comillas, \\\\ para barras\n`;
@@ -115,4 +118,3 @@ export function createScenesPrompt(title: string, content: string, language: str
 
   return prompt;
 }
-

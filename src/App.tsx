@@ -20,6 +20,7 @@ import CharacterHobbies from "./pages/CharacterHobbies";
 import CharacterPersonality from "./pages/CharacterPersonality";
 import CharacterProfession from "./pages/CharacterProfession";
 import DurationSelection from "./pages/DurationSelection";
+import StoryCreationMode from "./pages/StoryCreationMode";
 import StoryGenre from "./pages/StoryGenre";
 import StoryMoral from "./pages/StoryMoral";
 import GeneratingStory from "./pages/GeneratingStory";
@@ -81,6 +82,7 @@ const App = () => {
 
                 {/* Protected routes */}
                 <Route path="/home" element={<AuthGuard><Home /></AuthGuard>} />
+                <Route path="/creation-mode" element={<AuthGuard><StoryCreationMode /></AuthGuard>} />
                 <Route path="/duration" element={<AuthGuard><DurationSelection /></AuthGuard>} />
                 <Route path="/characters-management" element={<AuthGuard><CharactersManagement /></AuthGuard>} />
                 <Route path="/character-selection" element={<AuthGuard><CharacterSelection /></AuthGuard>} />

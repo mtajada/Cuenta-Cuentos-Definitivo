@@ -1,4 +1,5 @@
 // src/services/StoryContinuationService.ts
+import { FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from "@supabase/supabase-js";
 import { Story, StoryChapter } from "../../types"; // Importa tus tipos
 import { supabase } from "../../supabaseClient";
 
@@ -12,6 +13,14 @@ interface OptionsResponse {
   options: { summary: string }[];
 }
 
+type SupabaseFunctionError = FunctionsHttpError | FunctionsRelayError | FunctionsFetchError;
+
+const formatFunctionsError = (error: SupabaseFunctionError): string => {
+  if ('context' in error && error.context) {
+    return `${error.message} - ${JSON.stringify(error.context)}`;
+  }
+  return error.message;
+};
 
 export class StoryContinuationService {
 
@@ -21,7 +30,7 @@ export class StoryContinuationService {
    * @param payload Los datos específicos para esa acción.
    * @returns La respuesta de la Edge Function (depende de la acción).
    */
-  private static async invokeContinuationFunction<T = any>(action: string, payload: object): Promise<T> {
+  private static async invokeContinuationFunction<T = unknown>(action: string, payload: object): Promise<T> {
     console.log(`Enviando solicitud a la Edge Function story-continuation (action: ${action})...`);
 
     const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
@@ -35,13 +44,6 @@ export class StoryContinuationService {
       ...payload // Incluir el resto de los datos (story, chapters, etc.)
     };
 
-    try {
-      const jsonBodyString = JSON.stringify(bodyPayload, null, 2); // Pretty print
-    } catch (stringifyError) {
-        console.error('[StoryContinuationService_DEBUG] Error during JSON.stringify:', stringifyError, 'Payload was:', bodyPayload);
-        throw new Error('Failed to stringify payload before sending to edge function.'); // Re-throw or handle
-    }
-
     const { data, error } = await supabase.functions.invoke<T>('story-continuation', { // Usar tipo genérico o específico
       body: bodyPayload, // PASAR EL OBJETO DIRECTAMENTE
       headers: {
@@ -52,10 +54,7 @@ export class StoryContinuationService {
 
     if (error) {
       console.error(`Error en Edge Function story-continuation (action: ${action}):`, error);
-      let message = error.message;
-      if ((error as any).context) {
-        message = `${message} - ${JSON.stringify((error as any).context)}`;
-      }
+      const message = formatFunctionsError(error);
       throw new Error(message);
     }
 

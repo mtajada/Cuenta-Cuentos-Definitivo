@@ -1,21 +1,40 @@
 // src/services/ai/GenerateStoryService.ts
+import { FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from "@supabase/supabase-js";
 import { StoryOptions, Story, StoryScenes } from "../../types"; // Importar Story si no está
 import { supabase } from "../../supabaseClient";
 
 export interface GenerateStoryParams {
-  options: Partial<StoryOptions>; // O el tipo completo si siempre está completo
+  options: Partial<StoryOptions> & {
+    creationMode?: 'standard' | 'image';
+    imageStyle?: string;
+  }; // O el tipo completo si siempre está completo
+  includeScenes?: boolean;
   language: string; // Required field for story generation
   childAge?: number;
   specialNeed?: string;
   additionalDetails?: string; // <-- Añadir nueva propiedad
+  storyId?: string;
 }
 
 // Definir el tipo de respuesta esperada de la Edge Function
 export interface GenerateStoryResponse {
   content: string;
   title: string;
-  scenes: StoryScenes; // NUEVO: prompts de imágenes generados por IA
+  scenes?: StoryScenes; // prompts de imágenes generados por IA (solo modo ilustrado)
+  imageStyle?: string;
+  creationMode?: 'standard' | 'image';
+  includeScenes?: boolean;
+  storyId?: string;
 }
+
+type SupabaseFunctionError = FunctionsHttpError | FunctionsRelayError | FunctionsFetchError;
+
+const formatFunctionsError = (error: SupabaseFunctionError): string => {
+  if ('context' in error && error.context) {
+    return `${error.message} - ${JSON.stringify(error.context)}`;
+  }
+  return error.message;
+};
 
 export class GenerateStoryService {
   /**
@@ -34,9 +53,13 @@ export class GenerateStoryService {
 
       // DEBUG: Log the exact payload being sent including character info
       const charactersInfo = `Characters (${params.options.characters?.length || 0}): ${params.options.characters?.map(c => c.name).join(', ') || 'None'}`;
+      const expectsScenes = params.includeScenes ?? params.options.creationMode !== 'standard';
 
       const { data, error } = await supabase.functions.invoke<GenerateStoryResponse>('generate-story', { // Especificar tipo de respuesta <T>
-        body: params, // El cuerpo ya contiene las opciones, idioma, etc. y additionalDetails
+        body: {
+          ...params,
+          includeScenes: params.includeScenes ?? expectsScenes,
+        }, // El cuerpo ya contiene las opciones, idioma, etc. y additionalDetails
         headers: {
           'Authorization': `Bearer ${token}` // Pasar el token
         }
@@ -44,22 +67,25 @@ export class GenerateStoryService {
 
       if (error) {
         console.error('Error en Edge Function generate-story:', error);
-        // Puedes intentar obtener más detalles del error si es un HttpError
-        let message = error.message;
-        if ((error as any).context) { // Supabase FunctionsHttpError tiene 'context'
-          message = `${message} - ${JSON.stringify((error as any).context)}`;
-        }
+        const message = formatFunctionsError(error);
         throw new Error(message);
       }
 
-      // Validar que la respuesta tiene el formato esperado { content: string, title: string, scenes: object }
-      if (!data || typeof data.content !== 'string' || typeof data.title !== 'string' || !data.scenes) {
+      // Validar que la respuesta tiene el formato esperado { content: string, title: string, scenes?: object }
+      if (!data || typeof data.content !== 'string' || typeof data.title !== 'string') {
         console.error('Respuesta inesperada de generate-story:', data);
-        throw new Error('La respuesta de generate-story no contiene contenido, título y scenes válidos.');
+        throw new Error('La respuesta de generate-story no contiene contenido y título válidos.');
+      }
+
+      if (expectsScenes && !data.scenes) {
+        console.error('Respuesta de generate-story sin scenes cuando eran esperados:', data);
+        throw new Error('La respuesta de generate-story no incluye scenes en modo con imágenes.');
       }
 
       console.log('Respuesta de generate-story recibida (título):', data.title);
-      console.log('Respuesta de generate-story recibida (scenes):', Object.keys(data.scenes));
+      if (data.scenes) {
+        console.log('Respuesta de generate-story recibida (scenes):', Object.keys(data.scenes));
+      }
       return data; // Devolver el objeto { content, title, scenes } completo
 
     } catch (error) {

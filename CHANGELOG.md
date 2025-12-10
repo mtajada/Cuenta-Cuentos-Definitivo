@@ -4,6 +4,15 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato está basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/),
 y este proyecto adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.5] - 2025-12-08
+
+### Añadido
+- **Selección de modo e ilustración**: Nuevo paso para elegir entre cuento estándar o con imágenes, incluyendo cuadrícula de estilos validados.
+
+### Mejoras
+- **Propagación de estilo**: El `imageStyle` se persiste en `stories.image_style` y viaja a generación de escenas, imágenes (Gemini/OpenAI) y PDFs ilustrados.
+- **Contrato de Edge Functions**: `generate-story`, `generate-scenes-from-content` y `generate-image` aceptan `imageStyle/styleId` y mapean automáticamente a `style: vivid|natural` según el catálogo.
+
 ## [1.1.4] - 2025-01-12
 
 ### Añadido

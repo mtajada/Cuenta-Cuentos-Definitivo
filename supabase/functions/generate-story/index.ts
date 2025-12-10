@@ -1,10 +1,17 @@
 // supabase/functions/generate-story/index.ts
 // v7.0 (OpenAI Client + JSON Output): Uses OpenAI client for Gemini, expects JSON.
 // IMPORTANT: prompt.ts has been updated to instruct AI for JSON output.
-import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
-import { corsHeaders } from '../_shared/cors.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.8';
-import OpenAI from "npm:openai@^4.33.0"; // Using OpenAI client
+import { serve } from "std/http/server.ts";
+import { corsHeaders } from "../_shared/cors.ts";
+import { createClient } from "supabase";
+import OpenAI from "openai"; // Using OpenAI client
+import {
+  DEFAULT_IMAGE_STYLE_ID,
+  getPromptDescriptorForStyleId,
+  getValidIllustrationStyleIds,
+  isValidIllustrationStyleId,
+  normalizeIllustrationStyleId,
+} from '../_shared/illustration-styles.ts';
 
 // Importar funciones de prompt desde prompt.ts
 // createUserPrompt_JsonFormat (antes createUserPrompt_SeparatorFormat) ahora genera un prompt que pide JSON.
@@ -37,6 +44,10 @@ function cleanExtractedText(text: string | undefined | null, type: 'title' | 'co
   return cleaned || defaultText; // Ensure non-empty string or default
 }
 
+function isValidUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 // --- Interfaces for Request Parameters ---
 interface StoryCharacter {
   name: string;
@@ -49,6 +60,8 @@ interface StoryOptionsInput {
   genre?: string;
   moral?: string;
   duration?: string;
+  creationMode?: string;
+  imageStyle?: string;
   language?: string;
   [key: string]: unknown;
 }
@@ -59,6 +72,8 @@ interface GenerateStoryRequestBody {
   specialNeed?: string;
   options?: StoryOptionsInput;
   additionalDetails?: string;
+  includeScenes?: boolean;
+  storyId?: string;
   [key: string]: unknown;
 }
 
@@ -66,7 +81,7 @@ interface GenerateStoryRequestBody {
 interface StoryGenerationResult {
   title: string;
   content: string;
-  scenes: {
+  scenes?: {
     character: string;
     cover: string;
     scene_1: string;
@@ -77,20 +92,30 @@ interface StoryGenerationResult {
   };
 }
 
-function isValidStoryResult(data: unknown): data is StoryGenerationResult {
+function isValidStoryResult(data: unknown, requireScenes: boolean): data is StoryGenerationResult {
   const record = data as Record<string, unknown>;
-  return !!data &&
+  const hasBase = !!data &&
     typeof record.title === 'string' &&
-    typeof record.content === 'string' &&
-    !!record.scenes &&
-    typeof record.scenes === 'object' &&
-    typeof (record.scenes as Record<string, unknown>).character === 'string' &&
-    typeof (record.scenes as Record<string, unknown>).cover === 'string' &&
-    typeof (record.scenes as Record<string, unknown>).scene_1 === 'string' &&
-    typeof (record.scenes as Record<string, unknown>).scene_2 === 'string' &&
-    typeof (record.scenes as Record<string, unknown>).scene_3 === 'string' &&
-    typeof (record.scenes as Record<string, unknown>).scene_4 === 'string' &&
-    typeof (record.scenes as Record<string, unknown>).closing === 'string';
+    typeof record.content === 'string';
+
+  if (!hasBase) {
+    return false;
+  }
+
+  if (!requireScenes) {
+    return true;
+  }
+
+  const scenes = record.scenes as Record<string, unknown> | undefined;
+  return !!scenes &&
+    typeof scenes === 'object' &&
+    typeof scenes.character === 'string' &&
+    typeof scenes.cover === 'string' &&
+    typeof scenes.scene_1 === 'string' &&
+    typeof scenes.scene_2 === 'string' &&
+    typeof scenes.scene_3 === 'string' &&
+    typeof scenes.scene_4 === 'string' &&
+    typeof scenes.closing === 'string';
 }
 
 // --- Main Handler ---
@@ -137,6 +162,11 @@ serve(async (req: Request) => {
 
   let userId: string | null = null;
   let userIdForIncrement: string | null = null;
+  let resolvedImageStyle = DEFAULT_IMAGE_STYLE_ID;
+  let shouldIncludeScenes: boolean = false;
+  let creationMode: 'standard' | 'image' = 'standard';
+  let storyIdFromPayload: string | null = null;
+  let persistedStoryId: string | null = null;
 
   try {
     // 3. AUTENTICACIÓN
@@ -206,6 +236,9 @@ serve(async (req: Request) => {
       console.log(`[${functionVersion}] params.language:`, params.language, typeof params.language);
       console.log(`[${functionVersion}] params.childAge:`, params.childAge, typeof params.childAge);
       console.log(`[${functionVersion}] params.options:`, params.options);
+      storyIdFromPayload = typeof params.storyId === 'string' && params.storyId.trim().length > 0
+        ? params.storyId.trim()
+        : null;
       if (params.options) {
         console.log(`[${functionVersion}] params.options.duration:`, params.options.duration, typeof params.options.duration);
         console.log(`[${functionVersion}] params.options.genre:`, params.options.genre, typeof params.options.genre);
@@ -319,6 +352,31 @@ serve(async (req: Request) => {
       if (params.options) {
         params.options.characters = charactersArray;
       }
+
+      creationMode = params.options?.creationMode === 'image' ? 'image' : 'standard';
+      shouldIncludeScenes = params.includeScenes ?? (creationMode === 'image');
+      if (params.options) {
+        params.options.creationMode = creationMode;
+      }
+
+      const requestedImageStyle =
+        shouldIncludeScenes && typeof params.options?.imageStyle === 'string' ? params.options.imageStyle : null;
+      if (shouldIncludeScenes && requestedImageStyle && !isValidIllustrationStyleId(requestedImageStyle)) {
+        throw new Error(
+          `imageStyle inválido. Valores permitidos: ${getValidIllustrationStyleIds().join(', ')}`,
+        );
+      }
+      resolvedImageStyle = shouldIncludeScenes
+        ? normalizeIllustrationStyleId(requestedImageStyle)
+        : DEFAULT_IMAGE_STYLE_ID;
+
+      if (shouldIncludeScenes && params.options) {
+        params.options.imageStyle = resolvedImageStyle;
+      }
+
+      console.log(
+        `[${functionVersion}] Image style resolved to ${resolvedImageStyle} (requested: ${requestedImageStyle ?? 'none'}) | includeScenes=${shouldIncludeScenes}`,
+      );
     
     } catch (error) {
       console.error(`[${functionVersion}] Failed to parse/validate JSON body for user ${userId}. Error:`, error);
@@ -328,10 +386,15 @@ serve(async (req: Request) => {
 
     // 6. Generación IA con OpenAI Client y Esperando JSON
     const systemPrompt = createSystemPrompt(params.language || 'Español', params.childAge, params.specialNeed);
+    const imageStyleDescriptor = shouldIncludeScenes
+      ? getPromptDescriptorForStyleId(resolvedImageStyle)
+      : '';
     const userPrompt = createUserPrompt_JsonFormat({ // Esta función ahora genera un prompt pidiendo JSON
       // Type assertion: we've validated the structure above
       options: params.options as unknown as {characters: {name: string}[]; genre: string; moral: string; duration?: string},
-      additionalDetails: params.additionalDetails
+      additionalDetails: params.additionalDetails,
+      imageStyleDescriptor,
+      includeScenes: shouldIncludeScenes,
     });
     const combinedPrompt = `${systemPrompt}\n\n${userPrompt}`;
 
@@ -367,13 +430,15 @@ serve(async (req: Request) => {
       try {
         // First try: Normal JSON parsing
         const storyResult: StoryGenerationResult = JSON.parse(aiResponseContent);
-        if (isValidStoryResult(storyResult)) {
+        if (isValidStoryResult(storyResult, shouldIncludeScenes)) {
           finalTitle = cleanExtractedText(storyResult.title, 'title');
           finalContent = cleanExtractedText(storyResult.content, 'content');
-          finalScenes = storyResult.scenes; // Guardar scenes
+          finalScenes = storyResult.scenes ?? null; // Guardar scenes solo si existen
           parsedSuccessfully = true;
           console.log(`[${functionVersion}] Parsed AI JSON successfully. Title: "${finalTitle}"`);
-          console.log(`[${functionVersion}] Scenes validated: ${Object.keys(storyResult.scenes).length} keys`);
+          if (shouldIncludeScenes && storyResult.scenes) {
+            console.log(`[${functionVersion}] Scenes validated: ${Object.keys(storyResult.scenes).length} keys`);
+          }
         } else {
           console.warn(`[${functionVersion}] AI response JSON structure is invalid. Received: ${aiResponseContent.substring(0, 500)}...`);
         }
@@ -394,7 +459,7 @@ serve(async (req: Request) => {
           // Look for patterns like: "key": "value with\nnewline"
           cleanedContent = cleanedContent.replace(
             /"(title|content)"\s*:\s*"((?:[^"\\]|\\.)*)"/gs,
-            (_match, key, value) => {
+            (_match: string, key: string, value: string) => {
               // Fix unescaped control characters within the string value
               const fixedValue = value
                 .replace(/\r\n/g, '\\n')  // Windows line endings
@@ -402,6 +467,7 @@ serve(async (req: Request) => {
                 .replace(/\r/g, '\\r')     // Mac line endings
                 .replace(/\t/g, '\\t')     // Tabs
                 // eslint-disable-next-line no-control-regex
+                // deno-lint-ignore no-control-regex
                 .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, ''); // Remove other control chars
               return `"${key}": "${fixedValue}"`;
             }
@@ -410,10 +476,10 @@ serve(async (req: Request) => {
           console.log(`[${functionVersion}] Cleaned content (first 400 chars): ${cleanedContent.substring(0, 400)}...`);
           
           const storyResult: StoryGenerationResult = JSON.parse(cleanedContent);
-          if (isValidStoryResult(storyResult)) {
+          if (isValidStoryResult(storyResult, shouldIncludeScenes)) {
             finalTitle = cleanExtractedText(storyResult.title, 'title');
             finalContent = cleanExtractedText(storyResult.content, 'content');
-            finalScenes = storyResult.scenes; // Guardar scenes
+            finalScenes = storyResult.scenes ?? null; // Guardar scenes solo si existen
             parsedSuccessfully = true;
             console.log(`[${functionVersion}] Parsed AI JSON successfully with aggressive cleaning. Title: "${finalTitle}"`);
           }
@@ -499,7 +565,60 @@ serve(async (req: Request) => {
 
     console.log(`[${functionVersion}] Final Title: "${finalTitle}", Final Content Length: ${finalContent.length}`);
 
-    // 8. Incrementar Contador
+    // 8. Validar escenas: si faltan, devolvemos error para evitar respuestas incompletas
+    if (shouldIncludeScenes && !finalScenes) {
+      console.error(`[${functionVersion}] Scenes missing after AI parsing. Failing request for user ${userId ?? 'UNKNOWN'}.`);
+      throw new Error("AI response missing scenes; generation incomplete.");
+    }
+
+    // 9. Persistir historia + image_style cuando se recibe un storyId
+    if (storyIdFromPayload) {
+      if (!isValidUuid(storyIdFromPayload)) {
+        throw new Error('storyId inválido. Debe ser un UUID válido.');
+      }
+
+      const primaryCharacterId =
+        (params.options?.characters?.[0] as { id?: unknown } | undefined)?.id ??
+        (params.options?.character as { id?: unknown } | undefined)?.id;
+
+      if (!primaryCharacterId || typeof primaryCharacterId !== 'string') {
+        throw new Error('storyId proporcionado pero falta character.id para persistir la historia.');
+      }
+
+      const { error: storyUpsertError } = await supabaseAdmin
+        .from('stories')
+        .upsert({
+          id: storyIdFromPayload,
+          user_id: userId,
+          title: finalTitle,
+          content: finalContent,
+          scenes: shouldIncludeScenes ? finalScenes : null,
+          image_style: shouldIncludeScenes ? resolvedImageStyle : null,
+          moral: params.options?.moral ?? null,
+          genre: params.options?.genre ?? null,
+          duration: params.options?.duration ?? null,
+          creation_mode: params.options?.creationMode ?? null,
+          additional_details: params.additionalDetails ?? null,
+          character_id: primaryCharacterId,
+        });
+
+      if (storyUpsertError) {
+        console.error(
+          `[${functionVersion}] Failed to persist story ${storyIdFromPayload} for user ${userId}:`,
+          storyUpsertError,
+        );
+        throw new Error(`No se pudo guardar la historia generada (${storyUpsertError.message}).`);
+      }
+
+      persistedStoryId = storyIdFromPayload;
+      console.log(
+        `[${functionVersion}] Historia ${persistedStoryId} guardada con image_style=${resolvedImageStyle}.`,
+      );
+    } else {
+      console.log(`[${functionVersion}] storyId no recibido; se omite persistencia en BD.`);
+    }
+
+    // 10. Incrementar Contador (solo si la generación fue completa)
     if (userIdForIncrement) {
       console.log(`[${functionVersion}] Incrementing count for ${userIdForIncrement}...`);
       const { error: incrementError } = await supabaseAdmin.rpc('increment_story_count', {
@@ -512,18 +631,29 @@ serve(async (req: Request) => {
       }
     }
 
-    // 9. Respuesta Final
-    const response: { content: string; title: string; scenes?: StoryGenerationResult['scenes'] } = {
+    // 11. Respuesta Final
+    const response: {
+      content: string;
+      title: string;
+      scenes?: StoryGenerationResult['scenes'];
+      imageStyle?: string;
+      storyId?: string;
+      includeScenes: boolean;
+      creationMode: 'standard' | 'image';
+    } = {
       content: finalContent,
-      title: finalTitle
+      title: finalTitle,
+      storyId: persistedStoryId ?? undefined,
+      includeScenes: shouldIncludeScenes,
+      creationMode,
     };
     
-    // Include scenes if they were successfully parsed
-    if (finalScenes) {
+    if (shouldIncludeScenes && finalScenes) {
       response.scenes = finalScenes;
+      response.imageStyle = resolvedImageStyle;
       console.log(`[${functionVersion}] Including scenes in response`);
     } else {
-      console.warn(`[${functionVersion}] WARNING: No scenes were parsed from AI response. This will cause issues downstream.`);
+      console.log(`[${functionVersion}] Responding without scenes (creationMode=${creationMode})`);
     }
     
     return new Response(JSON.stringify(response), {
@@ -532,7 +662,7 @@ serve(async (req: Request) => {
     });
 
   } catch (error) {
-    // 10. Manejo de Errores
+    // 12. Manejo de Errores
     console.error(`[${functionVersion}] Error (User: ${userId || 'UNKNOWN'}):`, error);
     let statusCode = 500;
     const message = error instanceof Error ? error.message : "Error interno desconocido.";
@@ -543,7 +673,7 @@ serve(async (req: Request) => {
       else if (lowerMessage.includes("límite")) statusCode = 429;
       else if (lowerMessage.includes("inválido") || lowerMessage.includes("json in body") || lowerMessage.includes("parámetros")) statusCode = 400;
       // Actualizado para errores de IA con JSON
-      else if (lowerMessage.includes("ai response was not valid json") || lowerMessage.includes("ai response was empty") || lowerMessage.includes("ai response json structure is invalid") || lowerMessage.includes("blocked") || lowerMessage.includes("filter")) statusCode = 502; // Bad Gateway
+      else if (lowerMessage.includes("ai response was not valid json") || lowerMessage.includes("ai response was empty") || lowerMessage.includes("ai response json structure is invalid") || lowerMessage.includes("blocked") || lowerMessage.includes("filter") || lowerMessage.includes("missing scenes")) statusCode = 502; // Bad Gateway
     }
 
     return new Response(JSON.stringify({

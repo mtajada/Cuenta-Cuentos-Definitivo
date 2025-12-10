@@ -1,11 +1,34 @@
 import { StoryOptionsState } from '../types/storeTypes';
-import { StoryOptions, StoryDuration, StoryCharacter } from '../../types';
+import { StoryOptions, StoryCharacter } from '../../types';
 import { createPersistentStore } from '../core/createStore';
 import { useCharacterStore } from '../character/characterStore';
+import { DEFAULT_IMAGE_STYLE_ID, normalizeImageStyleId } from '@/lib/image-styles';
+
+const DEFAULT_CREATION_MODE: StoryOptions['creationMode'] = 'standard';
+
+const applyDefaults = (
+  state: StoryOptionsState,
+  overrides: Partial<StoryOptions> = {},
+): Partial<StoryOptions> => {
+  const creationMode = overrides.creationMode ?? state.currentStoryOptions.creationMode ?? DEFAULT_CREATION_MODE;
+  const imageStyle = normalizeImageStyleId(
+    overrides.imageStyle ?? state.currentStoryOptions.imageStyle ?? DEFAULT_IMAGE_STYLE_ID,
+  );
+
+  return {
+    ...state.currentStoryOptions,
+    ...overrides,
+    creationMode,
+    imageStyle,
+  };
+};
 
 // Estado inicial
 const initialState: Pick<StoryOptionsState, 'currentStoryOptions' | 'additionalDetails' | 'selectedCharacterIds'> = {
-  currentStoryOptions: {},
+  currentStoryOptions: {
+    creationMode: DEFAULT_CREATION_MODE,
+    imageStyle: DEFAULT_IMAGE_STYLE_ID,
+  },
   additionalDetails: null,
   selectedCharacterIds: [],
 };
@@ -14,25 +37,38 @@ export const useStoryOptionsStore = createPersistentStore<StoryOptionsState>(
   initialState,
   (set) => ({
     updateStoryOptions: (options) => set((state) => ({
-      currentStoryOptions: { ...state.currentStoryOptions, ...options }
+      currentStoryOptions: applyDefaults(state, options),
     })),
     
-    resetStoryOptions: () => set({ 
-      currentStoryOptions: {}, 
+    resetStoryOptions: () => set((state) => ({ 
+      currentStoryOptions: { 
+        creationMode: state.currentStoryOptions.creationMode ?? DEFAULT_CREATION_MODE,
+        imageStyle: normalizeImageStyleId(
+          state.currentStoryOptions.imageStyle ?? DEFAULT_IMAGE_STYLE_ID,
+        ),
+      }, 
       additionalDetails: null,
       selectedCharacterIds: []
-    }),
+    })),
     
     setDuration: (duration) => set((state) => ({
-      currentStoryOptions: { ...state.currentStoryOptions, duration }
+      currentStoryOptions: applyDefaults(state, { duration }),
     })),
     
     setMoral: (moral) => set((state) => ({
-      currentStoryOptions: { ...state.currentStoryOptions, moral }
+      currentStoryOptions: applyDefaults(state, { moral }),
     })),
     
     setGenre: (genre) => set((state) => ({
-      currentStoryOptions: { ...state.currentStoryOptions, genre }
+      currentStoryOptions: applyDefaults(state, { genre }),
+    })),
+
+    setCreationMode: (mode) => set((state) => ({
+      currentStoryOptions: applyDefaults(state, { creationMode: mode }),
+    })),
+
+    setImageStyle: (style) => set((state) => ({
+      currentStoryOptions: applyDefaults(state, { imageStyle: style }),
     })),
     
     setAdditionalDetails: (details) => set({ additionalDetails: details }),
@@ -53,11 +89,7 @@ export const useStoryOptionsStore = createPersistentStore<StoryOptionsState>(
       const characterIds = characters.map(char => char.id);
       set((state) => ({
         selectedCharacterIds: characterIds,
-        currentStoryOptions: {
-          ...state.currentStoryOptions,
-          // Usar siempre el array de personajes (simplificado)
-          characters: characters
-        }
+        currentStoryOptions: applyDefaults(state, { characters }),
       }));
     },
   }),

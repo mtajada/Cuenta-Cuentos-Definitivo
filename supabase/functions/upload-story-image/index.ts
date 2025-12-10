@@ -1,5 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import {
+  DEFAULT_IMAGE_STYLE_ID,
+  getOpenAiStyleForStyleId,
+  isValidIllustrationStyleId,
+  normalizeIllustrationStyleId,
+} from '../_shared/illustration-styles.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -21,6 +27,8 @@ interface UploadImageRequest {
   resizedFrom?: string | null;
   resizedTo?: string | null;
   userId?: string | null;
+  styleId?: string | null;
+  openAiStyle?: 'vivid' | 'natural' | null;
 }
 
 const VALID_IMAGE_TYPES = new Set(['cover', 'scene_1', 'scene_2', 'scene_3', 'scene_4', 'closing', 'character']);
@@ -73,6 +81,9 @@ type StoryImageMetadataPayload = {
   resizedTo?: string | null;
   latencyMs?: number | null;
   userId: string;
+  status?: 'uploaded' | 'inline_base64' | 'legacy';
+  styleId?: string | null;
+  openAiStyle?: 'vivid' | 'natural' | null;
 };
 
 function isValidUuid(value: string | null | undefined): value is string {
@@ -87,11 +98,34 @@ function normalizeChapterIdForMetadata(chapterId: string | null, storyId: string
   return chapterId === storyId ? null : chapterId;
 }
 
+function normalizeStyleMetadata(
+  styleId: string | null | undefined,
+  openAiStyle: string | null | undefined,
+): { styleId: string; openAiStyle: 'vivid' | 'natural' } {
+  const rawStyleId = typeof styleId === 'string' ? styleId : null;
+  if (rawStyleId && !isValidIllustrationStyleId(rawStyleId)) {
+    console.warn(
+      `[UPLOAD_STORY_IMAGE] Invalid styleId received (${rawStyleId}); defaulting to ${DEFAULT_IMAGE_STYLE_ID}`,
+    );
+  }
+
+  const resolvedStyleId = normalizeIllustrationStyleId(rawStyleId);
+  const requestedOpenAiStyle = openAiStyle === 'vivid' || openAiStyle === 'natural' ? openAiStyle : null;
+  const mappedOpenAiStyle = getOpenAiStyleForStyleId(resolvedStyleId);
+  const resolvedOpenAiStyle = rawStyleId ? mappedOpenAiStyle : (requestedOpenAiStyle ?? mappedOpenAiStyle);
+
+  return {
+    styleId: resolvedStyleId,
+    openAiStyle: resolvedOpenAiStyle,
+  };
+}
+
 async function upsertStoryImageMetadata(
   supabaseAdmin: SupabaseClient,
   payload: StoryImageMetadataPayload
 ): Promise<void> {
   const normalizedChapterId = normalizeChapterIdForMetadata(payload.chapterId, payload.storyId);
+  const status = payload.status ?? 'uploaded';
 
   const insertPayload = {
     story_id: payload.storyId,
@@ -107,6 +141,9 @@ async function upsertStoryImageMetadata(
     resized_to: payload.resizedTo ?? null,
     latency_ms: typeof payload.latencyMs === 'number' ? payload.latencyMs : null,
     user_id: payload.userId,
+    status,
+    style_id: payload.styleId ?? null,
+    openai_style: payload.openAiStyle ?? null,
   };
 
   const { error: insertError } = await supabaseAdmin.from('story_images').insert(insertPayload);
@@ -184,6 +221,11 @@ serve(async (req: Request) => {
         headers: corsHeaders,
       });
     }
+
+    const { styleId: resolvedStyleId, openAiStyle: resolvedOpenAiStyle } = normalizeStyleMetadata(
+      body.styleId ?? null,
+      body.openAiStyle ?? null,
+    );
 
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -263,6 +305,8 @@ serve(async (req: Request) => {
           resizedTo: body.resizedTo ?? null,
           latencyMs: typeof body.latencyMs === 'number' ? body.latencyMs : null,
           userId: effectiveUserId,
+          styleId: resolvedStyleId,
+          openAiStyle: resolvedOpenAiStyle,
         });
         console.log('[UPLOAD_STORY_IMAGE] Metadata persisted in story_images');
       } catch (metadataError) {
@@ -286,6 +330,8 @@ serve(async (req: Request) => {
         storyId,
         chapterId: normalizedChapterId,
         imageType,
+        styleId: resolvedStyleId,
+        openAiStyle: resolvedOpenAiStyle,
       }),
       {
         status: 200,

@@ -2,6 +2,9 @@ import { StoriesState } from "../types/storeTypes";
 import { createPersistentStore } from "../core/createStore";
 import { getUserStories, syncQueue, syncStory } from "../../services/supabase";
 import { useUserStore } from "../user/userStore";
+import { DEFAULT_IMAGE_STYLE_ID } from "@/lib/image-styles";
+
+const DEFAULT_CREATION_MODE = 'standard';
 
 // Estado inicial
 const initialState: Pick<
@@ -48,6 +51,10 @@ export const useStoriesStore = createPersistentStore<StoriesState>(
               duration: story.options.duration,
               character_id: story.options.characters[0]?.id, // Primary character
               additional_details: story.additional_details,
+              image_style: story.options.creationMode === 'image'
+                ? story.options.imageStyle || DEFAULT_IMAGE_STYLE_ID
+                : null,
+              creation_mode: story.options.creationMode || DEFAULT_CREATION_MODE,
             });
           }
         }

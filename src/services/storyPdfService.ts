@@ -5,14 +5,85 @@ import { ImageGenerationService, GeneratedImageMetadata, ImageGenerationSummary 
 import jsPDF from 'jspdf';
 import { APP_CONFIG } from '../config/app';
 import { getImageLayout } from '@/lib/image-layout';
+import { DEFAULT_IMAGE_STYLE_ID } from '@/lib/image-styles';
 
 export interface StoryImageValidationDetail extends GeneratedImageMetadata {
   publicUrl: string;
+  storageBucket?: string;
+}
+
+function parseResolutionString(resolution?: string | null): { width: number; height: number } | null {
+  if (!resolution || typeof resolution !== 'string') {
+    return null;
+  }
+  const match = resolution.trim().toLowerCase().match(/^(\d+)\s*x\s*(\d+)$/);
+  if (!match) {
+    return null;
+  }
+  const width = Number.parseInt(match[1], 10);
+  const height = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  return { width, height };
+}
+
+function getGreatestCommonDivisor(a: number, b: number): number {
+  let x = Math.abs(a);
+  let y = Math.abs(b);
+  while (y) {
+    const temp = y;
+    y = x % y;
+    x = temp;
+  }
+  return x || 1;
+}
+
+function inferAspectRatioFromResolution(resolution?: string | null): string | undefined {
+  const parsed = parseResolutionString(resolution);
+  if (!parsed) {
+    return undefined;
+  }
+
+  const ratio = parsed.width / parsed.height;
+  const layout = getImageLayout();
+  const a4Ratio = layout.canvas.width / layout.canvas.height;
+
+  const candidates: Array<{ label: string; value: number }> = [
+    { label: 'A4', value: a4Ratio },
+    { label: '4:5', value: 4 / 5 },
+    { label: '3:4', value: 3 / 4 },
+    { label: '1:1', value: 1 },
+    { label: '4:3', value: 4 / 3 },
+    { label: '16:9', value: 16 / 9 },
+    { label: '9:16', value: 9 / 16 },
+  ];
+
+  let closest = candidates[0];
+  let smallestDelta = Math.abs(ratio - closest.value);
+
+  for (let i = 1; i < candidates.length; i += 1) {
+    const delta = Math.abs(ratio - candidates[i].value);
+    if (delta < smallestDelta) {
+      closest = candidates[i];
+      smallestDelta = delta;
+    }
+  }
+
+  const gcd = getGreatestCommonDivisor(parsed.width, parsed.height);
+  const simplifiedLabel = `${Math.round(parsed.width / gcd)}:${Math.round(parsed.height / gcd)}`;
+
+  if (closest.label === simplifiedLabel) {
+    return closest.label;
+  }
+
+  return `${closest.label} (${simplifiedLabel})`;
 }
 
 interface StoryImageMetadataRecord {
   image_type: string;
   storage_path: string | null;
+  storage_bucket?: string | null;
   provider: string | null;
   fallback_used: boolean | null;
   mime_type: string | null;
@@ -22,6 +93,7 @@ interface StoryImageMetadataRecord {
   resized_to: string | null;
   latency_ms: number | null;
   chapter_id: string | null;
+  status?: string | null;
 }
 
 interface FetchImageMetadataOptions {
@@ -61,6 +133,7 @@ interface StoryPdfGenerationOptions {
   content: string;
   storyId: string;
   chapterId: string;
+  imageStyle?: string;
 }
 
 interface IllustratedPdfGenerationOptions extends StoryPdfGenerationOptions {
@@ -83,6 +156,9 @@ export interface ImageGenerationProgress {
   completedImages: number;
   totalImages: number;
   progress: number; // 0-100
+  summary?: ImageGenerationSummary;
+  metadataByType?: Partial<Record<string, GeneratedImageMetadata>>;
+  imageUrls?: Partial<Record<string, string>>;
 }
 
 /**
@@ -90,6 +166,18 @@ export interface ImageGenerationProgress {
  */
 interface CompleteIllustratedPdfOptions extends StoryPdfGenerationOptions {
   onProgress?: (progress: ImageGenerationProgress) => void;
+  onGenerationResult?: (result: {
+    imageUrls: {
+      cover: string;
+      scene_1: string;
+      scene_2: string;
+      scene_3: string;
+      scene_4: string;
+      closing: string;
+    };
+    metadataByType?: Partial<Record<string, GeneratedImageMetadata>>;
+    summary?: ImageGenerationSummary;
+  }) => void;
 }
 
 /**
@@ -104,7 +192,6 @@ export class StoryPdfService {
   private static readonly REQUIRED_IMAGES = [IMAGES_TYPE.COVER, IMAGES_TYPE.SCENE_1, IMAGES_TYPE.SCENE_2, IMAGES_TYPE.SCENE_3, IMAGES_TYPE.SCENE_4, IMAGES_TYPE.CLOSING];
   private static readonly IMAGE_BUCKET = 'images-stories';
   private static readonly LEGACY_IMAGE_BUCKET = 'story-images';
-  private static readonly FALLBACK_EXTENSIONS = ['jpeg', 'jpg', 'png', 'webp'];
   
   // TEMPORARY: Development mode to use local preview images
   // TODO: Set to false when ready for production
@@ -166,14 +253,6 @@ export class StoryPdfService {
           console.log(`[StoryPdfService] ❌ No metadata for ${imageType}`);
         } else {
           detail = await this.buildDetailFromMetadataRecord(selectedRecord, storyId, imageType);
-        }
-
-        if (!detail) {
-          detail = await this.tryLegacyStorageFallback({
-            storyId,
-            chapterId: normalizedChapterId,
-            imageType,
-          });
         }
 
         if (!detail) {
@@ -426,7 +505,7 @@ export class StoryPdfService {
     const { data, error } = await supabase
       .from('story_images')
       .select(
-        'image_type, storage_path, provider, fallback_used, mime_type, original_resolution, final_resolution, resized_from, resized_to, latency_ms, chapter_id'
+        'image_type, storage_path, provider, fallback_used, mime_type, original_resolution, final_resolution, resized_from, resized_to, latency_ms, chapter_id, status'
       )
       .eq('story_id', storyId)
       .in('image_type', imageTypes);
@@ -464,12 +543,20 @@ export class StoryPdfService {
     storyId: string,
     imageType: string
   ): Promise<StoryImageValidationDetail | null> {
+    const normalizedStatus = record.status?.trim().toLowerCase();
+    if (normalizedStatus && normalizedStatus !== 'uploaded') {
+      console.log(
+        `[StoryPdfService] ❌ Metadata for ${imageType} has non-uploaded status (${normalizedStatus}); skipping`
+      );
+      return null;
+    }
+
     if (!record.storage_path) {
       console.log(`[StoryPdfService] ❌ Metadata for ${imageType} is missing storage_path`);
       return null;
     }
 
-    const publicUrl = await this.resolveStoragePublicUrl(this.IMAGE_BUCKET, record.storage_path, imageType, 'metadata');
+    const { publicUrl, bucketUsed } = await this.resolveStoragePublicUrl(record.storage_path, imageType, record.storage_bucket);
     if (!publicUrl) {
       console.log(
         `[StoryPdfService] ❌ Storage object unavailable for ${imageType} despite metadata entry ${record.storage_path}`
@@ -477,20 +564,45 @@ export class StoryPdfService {
       return null;
     }
 
+    const layoutSpec = getImageLayout();
+    const canvasPxLabel = `${layoutSpec.canvas.width}x${layoutSpec.canvas.height}`;
+    const requestedAspectRatio = layoutSpec.requestedAspectRatio;
+    const effectiveAspectRatio =
+      inferAspectRatioFromResolution(record.original_resolution) ??
+      inferAspectRatioFromResolution(record.resized_to) ??
+      inferAspectRatioFromResolution(record.final_resolution) ??
+      layoutSpec.resolvedAspectRatio;
+
+    const resolvedPx =
+      record.final_resolution?.match(/\d{2,5}x\d{2,5}/)?.[0] ??
+      record.resized_to?.match(/\d{2,5}x\d{2,5}/)?.[0] ??
+      record.original_resolution?.match(/\d{2,5}x\d{2,5}/)?.[0] ??
+      canvasPxLabel;
+
+    const finalResolutionLabel = record.final_resolution
+      ? record.final_resolution.includes(layoutSpec.layoutLabel)
+        ? record.final_resolution
+        : `${layoutSpec.layoutLabel} (${record.final_resolution})`
+      : layoutSpec.canvasLabel;
+
     return {
       publicUrl,
       providerUsed: this.normalizeProvider(record.provider),
       fallbackUsed: Boolean(record.fallback_used),
       latencyMs: typeof record.latency_ms === 'number' ? record.latency_ms : undefined,
-      requestedAspectRatio: undefined,
-      effectiveAspectRatio: undefined,
-      requestSize: undefined,
+      requestedAspectRatio,
+      effectiveAspectRatio,
+      requestSize: layoutSpec.openaiFallbackSize,
       originalResolution: record.original_resolution ?? undefined,
-      finalResolution: record.final_resolution ?? undefined,
+      finalResolution: finalResolutionLabel ?? undefined,
+      finalResolutionPx: resolvedPx ?? undefined,
+      finalLayout: layoutSpec.layoutLabel,
+      canvasLabel: layoutSpec.canvasLabel,
       resizedFrom: record.resized_from ?? undefined,
       resizedTo: record.resized_to ?? undefined,
       mimeType: record.mime_type ?? undefined,
       storagePath: record.storage_path ?? undefined,
+      storageBucket: bucketUsed ?? record.storage_bucket ?? undefined,
       storyId,
       chapterId: record.chapter_id ?? undefined,
       imageType,
@@ -498,93 +610,38 @@ export class StoryPdfService {
   }
 
   private static async resolveStoragePublicUrl(
-    bucket: string,
     storagePath: string,
     imageType: string,
-    source: 'metadata' | 'fallback'
-  ): Promise<string | null> {
-    const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(storagePath);
-    const publicUrl = publicUrlData?.publicUrl;
-    if (!publicUrl) {
-      console.log(
-        `[StoryPdfService] ❌ Unable to resolve public URL for ${imageType} using ${source} path ${storagePath}`
-      );
-      return null;
+    preferredBucket?: string | null
+  ): Promise<{ publicUrl: string | null; bucketUsed: string | null }> {
+    const bucketsToTry: string[] = [];
+    const normalizedPreferred = preferredBucket?.trim();
+
+    if (normalizedPreferred) {
+      bucketsToTry.push(normalizedPreferred);
     }
 
-    try {
-      const response = await fetch(publicUrl, { method: 'HEAD' });
-      if (response.ok) {
-        return publicUrl;
-      }
-
-      console.warn(
-        `[StoryPdfService] ❌ HEAD check for ${imageType} at ${storagePath} (${bucket}) returned ${response.status}`
-      );
-      return null;
-    } catch (error) {
-      console.warn(
-        `[StoryPdfService] ❌ HEAD request failed for ${imageType} at ${storagePath} (${bucket})`,
-        error
-      );
-      return null;
-    }
-  }
-
-  private static async tryLegacyStorageFallback(options: {
-    storyId: string;
-    chapterId?: string;
-    imageType: string;
-  }): Promise<StoryImageValidationDetail | null> {
-    const storyId = options.storyId?.trim();
-    if (!storyId) {
-      return null;
+    if (!bucketsToTry.includes(this.IMAGE_BUCKET)) {
+      bucketsToTry.push(this.IMAGE_BUCKET);
     }
 
-    const normalizedChapterId = options.chapterId && options.chapterId.trim().length > 0 ? options.chapterId.trim() : undefined;
-    const basePaths = normalizedChapterId ? [`${storyId}/${normalizedChapterId}`, storyId] : [storyId];
-    const buckets: Array<{ name: string; provider: GeneratedImageMetadata['providerUsed'] }> = [
-      { name: this.IMAGE_BUCKET, provider: 'normalized_storage' },
-      { name: this.LEGACY_IMAGE_BUCKET, provider: 'legacy_storage' },
-    ];
+    if (!bucketsToTry.includes(this.LEGACY_IMAGE_BUCKET)) {
+      bucketsToTry.push(this.LEGACY_IMAGE_BUCKET);
+    }
 
-    for (const { name, provider } of buckets) {
-      for (const base of basePaths) {
-        for (const extension of this.FALLBACK_EXTENSIONS) {
-          const storagePath = `${base}/${options.imageType}.${extension}`;
-          const publicUrl = await this.resolveStoragePublicUrl(name, storagePath, options.imageType, 'fallback');
-          if (!publicUrl) {
-            continue;
-          }
-
-          console.log(
-            `[StoryPdfService] 🔄 Using ${provider === 'legacy_storage' ? 'legacy' : 'normalized'} storage fallback for ${options.imageType} at ${name}/${storagePath}`
-          );
-
-          return {
-            publicUrl,
-            providerUsed: provider,
-            fallbackUsed: true,
-            latencyMs: undefined,
-            requestedAspectRatio: undefined,
-            effectiveAspectRatio: undefined,
-            requestSize: undefined,
-            originalResolution: undefined,
-            finalResolution: undefined,
-            resizedFrom: undefined,
-            resizedTo: undefined,
-            mimeType: undefined,
-            storagePath,
-            storyId,
-            chapterId: normalizedChapterId,
-            imageType: options.imageType,
-          };
+    for (const bucket of bucketsToTry) {
+      const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(storagePath);
+      const publicUrl = publicUrlData?.publicUrl;
+      if (publicUrl) {
+        if (bucket === this.LEGACY_IMAGE_BUCKET && bucket !== normalizedPreferred) {
+          console.warn(`[StoryPdfService] ⚠️ Resolved ${imageType} from legacy bucket ${bucket} -> ${storagePath}`);
         }
+        return { publicUrl, bucketUsed: bucket };
       }
     }
 
-    console.log(`[StoryPdfService] ❌ No storage fallback available for ${options.imageType}`);
-    return null;
+    console.log(`[StoryPdfService] ❌ Unable to resolve public URL for ${imageType} at any bucket for path ${storagePath}`);
+    return { publicUrl: null, bucketUsed: null };
   }
 
   /**
@@ -1378,9 +1435,9 @@ export class StoryPdfService {
    * Generates illustrated PDF with automatic image generation if needed
    * @param options Complete illustrated PDF options with progress callback
    * @returns Promise with generated PDF blob
-   */
+  */
   static async generateCompleteIllustratedPdf(options: CompleteIllustratedPdfOptions): Promise<Blob> {
-    const { title, author, content, storyId, chapterId, onProgress } = options;
+    const { title, author, content, storyId, chapterId, imageStyle, onProgress, onGenerationResult } = options;
     
     try {
       console.log('[StoryPdfService] Starting complete illustrated PDF generation for:', title);
@@ -1396,6 +1453,8 @@ export class StoryPdfService {
       const imageValidation = await this.validateRequiredImages(storyId, chapterId);
       
       let imageUrls: { cover: string; scene_1: string; scene_2: string; scene_3: string; scene_4: string; closing: string };
+      let generationMetadataByType: Partial<Record<string, GeneratedImageMetadata>> | undefined;
+      let generationSummary: ImageGenerationSummary | undefined;
       
       // TEMPORARY: In dev mode, skip image generation and use local images
       if (this.DEV_MODE) {
@@ -1427,7 +1486,7 @@ export class StoryPdfService {
         });
         
         const generationResult = await this.generateImagesWithProgress(
-          { storyId, chapterId },
+          { storyId, chapterId, imageStyle },
           onProgress
         );
         
@@ -1462,6 +1521,8 @@ export class StoryPdfService {
         }
         
         imageUrls = generationResult.imageUrls;
+        generationMetadataByType = generationResult.metadataByType;
+        generationSummary = generationResult.summary;
       } else {
         console.log('[StoryPdfService] All images exist, proceeding with PDF generation...');
         imageUrls = {
@@ -1477,7 +1538,21 @@ export class StoryPdfService {
             throw new Error(`Faltó la URL pública para ${key} a pesar de validación positiva`);
           }
         }
+
+        generationMetadataByType = imageValidation.imageDetails
+          ? Object.entries(imageValidation.imageDetails).reduce<Record<string, GeneratedImageMetadata>>((acc, [type, detail]) => {
+              const { publicUrl, ...rest } = detail;
+              acc[type] = rest;
+              return acc;
+            }, {})
+          : undefined;
       }
+      
+      onGenerationResult?.({
+        imageUrls,
+        metadataByType: generationMetadataByType,
+        summary: generationSummary,
+      });
       
       // Step 3: Generate illustrated PDF
       onProgress?.({
@@ -1517,19 +1592,19 @@ export class StoryPdfService {
    * @param options Image generation options
    * @param onProgress Progress callback function
    * @returns Promise with generation result and image URLs
-   */
+  */
   private static async generateImagesWithProgress(
-    options: { storyId: string; chapterId: string },
+    options: { storyId: string; chapterId: string; imageStyle?: string },
     onProgress?: (progress: ImageGenerationProgress) => void
   ): Promise<{
     success: boolean;
     imageUrls?: { cover: string; scene_1: string; scene_2: string; scene_3: string; scene_4: string; closing: string };
-    metadataByType?: Record<string, GeneratedImageMetadata>;
+    metadataByType?: Partial<Record<string, GeneratedImageMetadata>>;
     summary?: ImageGenerationSummary;
     error?: string;
   }> {
     try {
-      const { storyId, chapterId } = options;
+      const { storyId, chapterId, imageStyle } = options;
       
       console.log('[StoryPdfService] Generating images with progress tracking...');
       
@@ -1544,7 +1619,7 @@ export class StoryPdfService {
       // 1. First, get story data from database (scenes, content, title)
       const { data: storyData, error: storyError } = await supabase
         .from('stories')
-        .select('scenes, content, title')
+        .select('scenes, content, title, image_style')
         .eq('id', storyId)
         .single();
 
@@ -1552,6 +1627,7 @@ export class StoryPdfService {
         throw new Error('No se pudo cargar la historia desde la base de datos');
       }
 
+      const resolvedImageStyle = imageStyle || storyData?.image_style || DEFAULT_IMAGE_STYLE_ID;
       let scenes = storyData?.scenes;
 
       // 2. If scenes don't exist, generate them on-demand
@@ -1572,7 +1648,9 @@ export class StoryPdfService {
           scenes = await generateScenesOnDemand(
             storyId,
             storyData.content,
-            storyData.title
+            storyData.title,
+            undefined,
+            resolvedImageStyle
           );
           
           console.log('[StoryPdfService] ✓ Scenes generated successfully on-demand');
@@ -1614,7 +1692,8 @@ export class StoryPdfService {
         const result = await ImageGenerationService.generateStoryImages({
           storyId,
           chapterId,
-          scenes: scenes
+          scenes: scenes,
+          imageStyle: resolvedImageStyle
         });
 
         if (result.summary) {
@@ -1673,7 +1752,10 @@ export class StoryPdfService {
           currentStep: 'Imágenes generadas exitosamente',
           completedImages: 6,
           totalImages: 6,
-          progress: 80
+          progress: 80,
+          summary: result.summary,
+          metadataByType: result.metadataByType,
+          imageUrls,
         });
         
         return {

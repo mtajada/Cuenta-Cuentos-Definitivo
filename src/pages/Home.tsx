@@ -29,7 +29,7 @@ export default function Home() {
 
   const handleNewStory = () => {
     if (canCreateStory()) {
-      navigate("/duration");
+      navigate("/creation-mode");
     } else {
       toast({
         title: "Límite de historias alcanzado",

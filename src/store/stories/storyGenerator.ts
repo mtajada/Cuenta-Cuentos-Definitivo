@@ -8,6 +8,9 @@ import { useStoryOptionsStore } from "../storyOptions/storyOptionsStore";
 import { generateId } from "../core/utils"; 
 import { GenerateStoryService, GenerateStoryParams } from "@/services/ai/GenerateStoryService";
 import { useChaptersStore } from "./chapters/chaptersStore"; 
+import { DEFAULT_IMAGE_STYLE_ID, normalizeImageStyleId } from "@/lib/image-styles";
+
+const DEFAULT_CREATION_MODE: StoryOptions['creationMode'] = 'standard';
 
 /**
  * Genera una historia completa (Capítulo 1 + Título) a partir de las opciones
@@ -25,6 +28,13 @@ export const generateStory = async (options: Partial<StoryOptions>): Promise<Sto
     const profileSettings = useUserStore.getState().profileSettings; 
     const selectedCharacters = storyOptionsState.getSelectedCharactersForStory(); 
     const additionalDetails = storyOptionsState.additionalDetails; 
+    const creationMode = storyOptionsState.currentStoryOptions.creationMode ?? DEFAULT_CREATION_MODE;
+    const shouldGenerateScenes = creationMode === 'image';
+    const imageStyle = shouldGenerateScenes
+      ? normalizeImageStyleId(
+          storyOptionsState.currentStoryOptions.imageStyle ?? DEFAULT_IMAGE_STYLE_ID,
+        )
+      : undefined;
 
     if (!profileSettings) throw new Error("Perfil de usuario no cargado.");
     if (!selectedCharacters || selectedCharacters.length === 0) throw new Error("No hay personajes seleccionados.");
@@ -42,31 +52,42 @@ export const generateStory = async (options: Partial<StoryOptions>): Promise<Sto
         genre: options.genre, 
         moral: options.moral, 
         duration: storyOptionsState.currentStoryOptions.duration, 
+        creationMode,
+        ...(shouldGenerateScenes ? { imageStyle } : {}),
       },
+      includeScenes: shouldGenerateScenes,
       language, 
       childAge: profileSettings.childAge ?? 5, 
       specialNeed: profileSettings.specialNeed, 
       additionalDetails: additionalDetails || undefined, 
+      storyId,
     };
 
     console.log("Enviando solicitud a la Edge Function generate-story con params:", payload);
 
     const storyResponse = await GenerateStoryService.generateStoryWithAI(payload);
     // storyResponse ahora es { content: string, title: string, scenes: StoryScenes }
+    const resolvedIncludeScenes = storyResponse.includeScenes ?? shouldGenerateScenes;
+    const resolvedStoryId = storyResponse.storyId || storyId;
+    const resolvedImageStyle =
+      storyResponse.imageStyle || imageStyle || DEFAULT_IMAGE_STYLE_ID;
+    const resolvedCreationMode = storyResponse.creationMode || creationMode;
 
     // Los personajes seleccionados ya están guardados, no necesitamos save individual
     // Solo guardamos currentCharacter si se usó para creación de personaje nuevo
     
     const story: Story = {
-      id: storyId,
+      id: resolvedStoryId,
       title: storyResponse.title, 
       content: storyResponse.content,
-      scenes: storyResponse.scenes, // NUEVO: incluir prompts de imágenes
+      scenes: resolvedIncludeScenes ? storyResponse.scenes : undefined, // prompts de imágenes solo en modo ilustrado
       options: { 
         moral: options.moral || "Ser amable", 
         characters: selectedCharacters,
         genre: options.genre || "aventura",
         duration: options.duration || "medium",
+        creationMode: resolvedCreationMode,
+        ...(resolvedIncludeScenes ? { imageStyle: resolvedImageStyle } : {}),
         language,
       },
       additional_details: additionalDetails, 

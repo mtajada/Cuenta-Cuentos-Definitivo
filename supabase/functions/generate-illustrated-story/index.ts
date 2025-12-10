@@ -3,11 +3,47 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.8';
 import { corsHeaders } from '../_shared/cors.ts';
+import { GEMINI_PREFERRED_ASPECT_RATIO } from '../_shared/image-layout.ts';
+import { normalizeIllustrationStyleId } from '../_shared/illustration-styles.ts';
 
-console.log(`[GENERATE_ILLUSTRATED_STORY_DEBUG] Function generate-illustrated-story initializing...`);
+console.log('[GENERATE_ILLUSTRATED_STORY_DEBUG] Function generate-illustrated-story initializing...');
+
+const REQUIRED_IMAGE_TYPES = ['cover', 'scene_1', 'scene_2', 'scene_3', 'scene_4', 'closing'] as const;
+type RequiredImageType = typeof REQUIRED_IMAGE_TYPES[number];
+
+type ScenesPayload = Record<RequiredImageType, string> & { character?: string };
+
+type GenerateImageResponse = {
+  success?: boolean;
+  publicUrl?: string | null;
+  metadata?: Record<string, unknown> | null;
+  error?: string;
+};
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function resolveScenes(rawScenes: unknown): ScenesPayload | null {
+  if (!rawScenes || typeof rawScenes !== 'object') return null;
+  const data = rawScenes as Record<string, unknown>;
+  for (const key of REQUIRED_IMAGE_TYPES) {
+    if (!isNonEmptyString(data[key])) {
+      return null;
+    }
+  }
+  return {
+    cover: (data.cover as string).trim(),
+    scene_1: (data.scene_1 as string).trim(),
+    scene_2: (data.scene_2 as string).trim(),
+    scene_3: (data.scene_3 as string).trim(),
+    scene_4: (data.scene_4 as string).trim(),
+    closing: (data.closing as string).trim(),
+    character: isNonEmptyString(data.character) ? (data.character as string).trim() : undefined,
+  };
+}
 
 serve(async (req: Request) => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     console.log('[GENERATE_ILLUSTRATED_STORY_DEBUG] Handling OPTIONS preflight request');
     return new Response('ok', { headers: corsHeaders });
@@ -15,156 +51,222 @@ serve(async (req: Request) => {
 
   console.log(`[GENERATE_ILLUSTRATED_STORY_DEBUG] Handling ${req.method} request`);
 
+  const authHeader = req.headers.get('Authorization') ?? '';
+  if (!authHeader.startsWith('Bearer ')) {
+    console.error('[GENERATE_ILLUSTRATED_STORY_ERROR] Missing or invalid Authorization header');
+    return new Response(JSON.stringify({ error: 'Token inválido o ausente' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
   try {
-    // 1. Initialize Supabase client
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-      { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
+      { global: { headers: { Authorization: authHeader } } },
     );
 
-    // 2. Parse request body
-    const requestBody = await req.json();
-    const { storyId, chapterId, title, author, userId } = requestBody;
-
-    console.log(`[GENERATE_ILLUSTRATED_STORY_DEBUG] Received request for story ${storyId}, chapter ${chapterId}, user ${userId}`);
-
-    // 3. Validate required parameters
-    if (!storyId || !chapterId || !title || !userId) {
-      console.error(`[GENERATE_ILLUSTRATED_STORY_ERROR] Missing required parameters`);
-      return new Response(JSON.stringify({ error: 'Missing required parameters' }), {
-        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    let requestBody: Record<string, unknown>;
+    try {
+      requestBody = await req.json();
+    } catch (_parseError) {
+      return new Response(JSON.stringify({ error: 'Cuerpo de la petición inválido' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // 4. Fetch story content from database
-    console.log(`[GENERATE_ILLUSTRATED_STORY_DEBUG] Fetching story content from database...`);
-    console.log(`[GENERATE_ILLUSTRATED_STORY_DEBUG] StoryId: ${storyId}, ChapterId: ${chapterId}`);
-    
-    let content: string;
-    let actualChapterId = chapterId;
+    const { storyId, chapterId, title, author } = requestBody as {
+      storyId?: string;
+      chapterId?: string;
+      title?: string;
+      author?: string | null;
+    };
 
-    // First, get the story data to check if it has content
+    if (!storyId || !chapterId || !title) {
+      console.error('[GENERATE_ILLUSTRATED_STORY_ERROR] Missing required parameters');
+      return new Response(JSON.stringify({ error: 'Faltan parámetros requeridos (storyId, chapterId, title)' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: userData, error: authError } = await supabaseAdmin.auth.getUser(token);
+    if (authError || !userData?.user) {
+      console.error('[GENERATE_ILLUSTRATED_STORY_ERROR] Authentication failed', authError);
+      return new Response(JSON.stringify({ error: 'No autenticado' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const userId = userData.user.id;
+
     const { data: storyData, error: storyError } = await supabaseAdmin
       .from('stories')
-      .select('content, id')
+      .select('id, content, scenes, image_style, user_id')
       .eq('id', storyId)
       .single();
 
     if (storyError || !storyData) {
-      console.error(`[GENERATE_ILLUSTRATED_STORY_ERROR] Story not found:`, storyError);
-      return new Response(JSON.stringify({ error: 'Story not found in database' }), {
-        status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      console.error('[GENERATE_ILLUSTRATED_STORY_ERROR] Story not found', storyError);
+      return new Response(JSON.stringify({ error: 'Historia no encontrada' }), {
+        status: 404,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Try to get content from story_chapters first
+    if (storyData.user_id && storyData.user_id !== userId) {
+      console.error('[GENERATE_ILLUSTRATED_STORY_ERROR] User does not own story', { storyUser: storyData.user_id, userId });
+      return new Response(JSON.stringify({ error: 'No tienes permiso para esta historia' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const { data: chapterData, error: chapterError } = await supabaseAdmin
       .from('story_chapters')
-      .select('content, id')
+      .select('id, content, scenes')
       .eq('id', chapterId)
       .single();
 
-    if (chapterError || !chapterData) {
-      console.log(`[GENERATE_ILLUSTRATED_STORY_DEBUG] Chapter not found in story_chapters (this is normal for initial stories), using story content...`);
-      
-      if (!storyData.content) {
-        console.error(`[GENERATE_ILLUSTRATED_STORY_ERROR] No content found in story or chapters`);
-        return new Response(JSON.stringify({ error: 'No content found for this story' }), {
-          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
+    let content: string | null = null;
+    let actualChapterId = chapterId;
+    let scenesSource: unknown = storyData.scenes;
 
-      content = storyData.content;
-      actualChapterId = storyId; // Use storyId as chapter identifier for initial stories
-      console.log(`[GENERATE_ILLUSTRATED_STORY_DEBUG] Using story content (${content.length} characters), actualChapterId: ${actualChapterId}`);
+    if (chapterError || !chapterData) {
+      console.log('[GENERATE_ILLUSTRATED_STORY_DEBUG] Chapter not found, using story content');
+      if (typeof storyData.content === 'string' && storyData.content.length > 0) {
+        content = storyData.content;
+      }
+      actualChapterId = storyId;
     } else {
-      content = chapterData.content;
-      console.log(`[GENERATE_ILLUSTRATED_STORY_DEBUG] Using chapter content (${content.length} characters), chapterId: ${chapterId}`);
+      if (typeof chapterData.content === 'string' && chapterData.content.length > 0) {
+        content = chapterData.content;
+      }
+      scenesSource = chapterData.scenes ?? storyData.scenes;
     }
 
-    // 5. Generate images for the story
-    console.log(`[GENERATE_ILLUSTRATED_STORY_INFO] Starting image generation for story ${storyId}, chapter ${actualChapterId}`);
-
-    // Call the image generation function
-    const { error: imageError } = await supabaseAdmin.functions.invoke('upload-story-image', {
-      body: {
-        storyId,
-        chapterId: actualChapterId,
-        imageType: 'cover',
-        prompt: `Create a beautiful, colorful cover illustration for a children's story titled "${title}". The illustration should be vibrant, engaging, and suitable for children. Style: digital art, bright colors, magical atmosphere.`
-      }
-    });
-
-    if (imageError) {
-      console.error(`[GENERATE_ILLUSTRATED_STORY_ERROR] Error generating cover image:`, imageError);
-      return new Response(JSON.stringify({ error: 'Failed to generate cover image' }), {
-        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    if (!content) {
+      console.error('[GENERATE_ILLUSTRATED_STORY_ERROR] No content found for story or chapter');
+      return new Response(JSON.stringify({ error: 'No hay contenido disponible para ilustrar' }), {
+        status: 404,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Generate scene images
-    const scenePrompts = [
-      `Create a beautiful, colorful illustration for a children's story scene. The scene should be vibrant, engaging, and suitable for children. Style: digital art, bright colors, magical atmosphere.`,
-      `Create a beautiful, colorful illustration for a children's story scene. The scene should be vibrant, engaging, and suitable for children. Style: digital art, bright colors, magical atmosphere.`
-    ];
+    const scenes = resolveScenes(scenesSource);
+    if (!scenes) {
+      console.error('[GENERATE_ILLUSTRATED_STORY_ERROR] Scenes prompts missing or invalid');
+      return new Response(JSON.stringify({ error: 'Faltan prompts de escenas; genera escenas antes de ilustrar' }), {
+        status: 422,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
-    for (let i = 0; i < scenePrompts.length; i++) {
-      const { error: sceneError } = await supabaseAdmin.functions.invoke('upload-story-image', {
+    const resolvedStyleId = normalizeIllustrationStyleId(
+      typeof (storyData as { image_style?: unknown }).image_style === 'string'
+        ? (storyData as { image_style?: string }).image_style
+        : null,
+    );
+
+    console.log(
+      `[GENERATE_ILLUSTRATED_STORY_INFO] Starting image pipeline for story ${storyId}, chapter ${actualChapterId}, style ${resolvedStyleId ?? 'default'}`,
+    );
+
+    const generatedImages: { imageType: RequiredImageType; publicUrl: string; metadata?: Record<string, unknown> | null }[] = [];
+
+    for (const imageType of REQUIRED_IMAGE_TYPES) {
+      const prompt = scenes[imageType];
+      const { data, error } = await supabaseAdmin.functions.invoke<GenerateImageResponse>('generate-image', {
         body: {
+          prompt,
           storyId,
           chapterId: actualChapterId,
-          imageType: `scene_${i + 1}`,
-          prompt: scenePrompts[i]
-        }
+          imageType,
+          desiredAspectRatio: GEMINI_PREFERRED_ASPECT_RATIO,
+          styleId: resolvedStyleId ?? undefined,
+        },
+        headers: { Authorization: authHeader },
       });
 
-      if (sceneError) {
-        console.error(`[GENERATE_ILLUSTRATED_STORY_ERROR] Error generating scene ${i + 1} image:`, sceneError);
-        return new Response(JSON.stringify({ error: `Failed to generate scene ${i + 1} image` }), {
-          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      if (error) {
+        console.error(`[GENERATE_ILLUSTRATED_STORY_ERROR] Edge function generate-image failed for ${imageType}`, error);
+        return new Response(JSON.stringify({ error: `Fallo al generar ${imageType}`, details: error.message ?? error }), {
+          status: 502,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
+
+      if (!data?.success) {
+        console.error(`[GENERATE_ILLUSTRATED_STORY_ERROR] generate-image returned failure for ${imageType}`, data);
+        return new Response(JSON.stringify({ error: `No se pudo generar ${imageType}`, details: data?.error ?? null }), {
+          status: 502,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (!data.publicUrl) {
+        console.error(`[GENERATE_ILLUSTRATED_STORY_ERROR] Missing publicUrl for ${imageType}; normalized upload is required`);
+        return new Response(
+          JSON.stringify({ error: `La ilustración ${imageType} no se subió al storage normalizado (images-stories)` }),
+          {
+            status: 502,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          },
+        );
+      }
+
+      generatedImages.push({
+        imageType,
+        publicUrl: data.publicUrl,
+        metadata: data.metadata ?? null,
+      });
     }
 
-    // 6. Generate the illustrated PDF
-    console.log(`[GENERATE_ILLUSTRATED_STORY_INFO] All images generated successfully. Now generating illustrated PDF...`);
+    console.log('[GENERATE_ILLUSTRATED_STORY_INFO] All images generated via generate-image. Invoking generate-illustrated-pdf...');
 
-    // Call the PDF generation function
-    const { error: pdfError } = await supabaseAdmin.functions.invoke('generate-illustrated-pdf', {
+    const { error: pdfError, data: pdfData } = await supabaseAdmin.functions.invoke('generate-illustrated-pdf', {
       body: {
         storyId,
         chapterId: actualChapterId,
         title,
         author,
         content,
-        userId
-      }
+        userId,
+      },
+      headers: { Authorization: authHeader },
     });
 
     if (pdfError) {
-      console.error(`[GENERATE_ILLUSTRATED_STORY_ERROR] Error generating illustrated PDF:`, pdfError);
-      return new Response(JSON.stringify({ error: 'Failed to generate illustrated PDF' }), {
-        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      console.error('[GENERATE_ILLUSTRATED_STORY_ERROR] Error generating illustrated PDF', pdfError);
+      return new Response(JSON.stringify({ error: 'Fallo al registrar PDF ilustrado', details: pdfError.message ?? pdfError }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    console.log(`[GENERATE_ILLUSTRATED_STORY_INFO] Illustrated story generation completed successfully for user ${userId}`);
+    console.log(`[GENERATE_ILLUSTRATED_STORY_INFO] Illustrated story generation completed for user ${userId}`);
 
-    // 6. Return success response
-    return new Response(JSON.stringify({ 
-      success: true, 
-      message: 'Illustrated story generated successfully' 
-    }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
-    });
-
+    return new Response(
+      JSON.stringify({
+        success: true,
+        message: 'Ilustraciones generadas y normalizadas con éxito',
+        images: generatedImages,
+        pdf: pdfData ?? null,
+      }),
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200,
+      },
+    );
   } catch (error: unknown) {
     console.error('[GENERATE_ILLUSTRATED_STORY_ERROR] Unhandled error in generate-illustrated-story:', error);
     const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
     return new Response(JSON.stringify({ error: `Error interno del servidor: ${errorMessage}` }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
-}); 
+});

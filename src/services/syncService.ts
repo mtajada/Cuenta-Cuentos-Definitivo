@@ -6,6 +6,12 @@ import { useUserStore } from "../store/user/userStore";
 // import { getCurrentUser } from "../supabaseAuth"; // Ya no se usa aquí directamente
 import { supabase } from "../supabaseClient"; // Importa el cliente supabase si no lo tienes ya
 
+declare global {
+    interface Window {
+        _syncListenersInitialized?: boolean;
+    }
+}
+
 /**
  * Servicio para INICIAR la sincronización de datos del usuario con Supabase
  * delegando la carga real al userStore.
@@ -73,7 +79,7 @@ export const syncUserData = async (): Promise<boolean> => {
  */
 export const initSyncListeners = () => {
     // Solo ejecutar en el cliente
-    if (typeof window !== "undefined" && !window.hasOwnProperty('_syncListenersInitialized')) {
+    if (typeof window !== "undefined" && !window._syncListenersInitialized) {
         console.log("Inicializando listeners de conectividad...");
         // Sincronizar cuando vuelve la conexión
         window.addEventListener("online", () => {
@@ -88,7 +94,7 @@ export const initSyncListeners = () => {
             }
         });
         // Añadir un flag para evitar duplicar listeners si esta función se llama más de una vez
-        (window as any)._syncListenersInitialized = true;
+        window._syncListenersInitialized = true;
     } else if (typeof window !== "undefined") {
         console.log("Listeners de conectividad ya inicializados.");
     }

@@ -12,6 +12,38 @@ import {
 // --- Importa la instancia ÚNICA del cliente Supabase ---
 import { supabase } from "../supabaseClient"; // Ajusta esta ruta si es necesario
 import { ScenesGenerationService } from "./ai/scenesGenerationService";
+import { DEFAULT_IMAGE_STYLE_ID } from "@/lib/image-styles";
+
+const DEFAULT_CREATION_MODE = 'standard';
+
+type UnknownRecord = Record<string, unknown>;
+type ServiceResult<T = void> = { success: boolean; error?: unknown } & (T extends void ? Record<string, never> : T);
+
+type ChallengeQuestionRow = {
+    id: string;
+    question: string;
+    options: string[];
+    correct_option_index: number;
+    explanation: string;
+    category: string;
+    target_language: string;
+};
+
+type AudioFileRow = {
+    id?: string;
+    user_id: string;
+    story_id: string;
+    chapter_id: string | number;
+    voice_id: string;
+    url?: string;
+    created_at?: string;
+};
+
+declare global {
+    interface Window {
+        _syncQueueListenerAdded?: boolean;
+    }
+}
 
 // --- Listener de Auth (Opcional, solo para logging) ---
 // Ya no inicializamos el cliente aquí, solo usamos el importado.
@@ -28,8 +60,8 @@ supabase.auth.onAuthStateChange((event, session) => {
 export const syncUserProfile = async (
     userId: string,
     // Renombramos el parámetro para claridad y ajustamos tipo
-    dataToSync: Partial<ProfileSettings> & { [key: string]: any },
-): Promise<{ success: boolean; error?: any }> => {
+    dataToSync: Partial<ProfileSettings> & UnknownRecord,
+): Promise<ServiceResult> => {
     try {
         console.log(`[syncUserProfile_DEBUG] Attempting to sync for user ${userId} with data:`, dataToSync);
 
@@ -64,7 +96,7 @@ export const syncUserProfile = async (
     }
 };
 
-export const getUserProfile = async (userId: string): Promise<{ success: boolean, profile?: ProfileSettings, error?: any }> => {
+export const getUserProfile = async (userId: string): Promise<ServiceResult<{ profile?: ProfileSettings }>> => {
     try {
         console.log(`Solicitando perfil para usuario: ${userId}`);
         const { data, error } = await supabase
@@ -116,7 +148,7 @@ export const getUserProfile = async (userId: string): Promise<{ success: boolean
 export const syncCharacter = async (
     userId: string,
     character: StoryCharacter,
-): Promise<{ success: boolean; error?: any }> => {
+): Promise<ServiceResult> => {
     try {
         console.log(`[DEBUG] Sincronizando personaje "${character.name}" (ID: ${character.id}) para usuario ${userId}`);
         const { data: existingChar, error: queryError } = await supabase
@@ -174,7 +206,7 @@ export const syncCharacter = async (
     }
 };
 
-export const getUserCharacters = async (userId: string): Promise<{ success: boolean; characters?: StoryCharacter[]; error?: any }> => {
+export const getUserCharacters = async (userId: string): Promise<ServiceResult<{ characters?: StoryCharacter[] }>> => {
     // --- CORREGIDO: Eliminada la consulta ineficiente ---
     try {
         console.log(`[DEBUG] Consultando personajes para usuario ${userId}`);
@@ -206,7 +238,7 @@ export const getUserCharacters = async (userId: string): Promise<{ success: bool
     }
 };
 
-export const deleteCharacter = async (characterId: string): Promise<{ success: boolean; error?: any }> => {
+export const deleteCharacter = async (characterId: string): Promise<ServiceResult> => {
     try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
@@ -251,7 +283,7 @@ export const deleteCharacter = async (characterId: string): Promise<{ success: b
 
 // --- Funciones de Historias ---
 
-export const syncStory = async (userId: string, story: Story): Promise<{ success: boolean; error?: any }> => {
+export const syncStory = async (userId: string, story: Story): Promise<ServiceResult> => {
     try {
         console.log(`Sincronizando historia ${story.id} para usuario ${userId}`);
         const storyData = {
@@ -265,6 +297,10 @@ export const syncStory = async (userId: string, story: Story): Promise<{ success
             genre: story.options.genre,
             duration: story.options.duration,
             character_id: story.options.characters[0]?.id, // Primary character (first selected)
+            image_style: story.options.creationMode === 'image'
+                ? story.options.imageStyle || DEFAULT_IMAGE_STYLE_ID
+                : null,
+            creation_mode: story.options.creationMode || DEFAULT_CREATION_MODE,
             additional_details: story.additional_details,
             updated_at: new Date(),
         };
@@ -282,12 +318,13 @@ export const syncStory = async (userId: string, story: Story): Promise<{ success
 };
 
 /**
- * Updates only the scenes field for a story
+ * Updates the scenes for a story and optionally the image style used to generate them
  * @param storyId Story identifier
  * @param scenes Scenes structure to update
+ * @param imageStyle Image style applied during scene generation
  * @returns Promise with success status
  */
-export const updateStoryScenes = async (storyId: string, scenes: StoryScenes): Promise<{ success: boolean; error?: any }> => {
+export const updateStoryScenes = async (storyId: string, scenes: StoryScenes, imageStyle?: string): Promise<ServiceResult> => {
     try {
         console.log(`[updateStoryScenes] Updating scenes for story ${storyId}`);
         
@@ -300,12 +337,20 @@ export const updateStoryScenes = async (storyId: string, scenes: StoryScenes): P
             }
         }
 
+        // Only persist image style when provided to avoid overwriting an existing style unintentionally
+        const resolvedImageStyle = imageStyle?.trim();
+        const updatePayload: Record<string, unknown> = {
+            scenes: scenes,
+            updated_at: new Date()
+        };
+
+        if (imageStyle !== undefined) {
+            updatePayload.image_style = resolvedImageStyle || DEFAULT_IMAGE_STYLE_ID;
+        }
+
         const { error } = await supabase
             .from("stories")
-            .update({ 
-                scenes: scenes,
-                updated_at: new Date()
-            })
+            .update(updatePayload)
             .eq("id", storyId);
 
         if (error) {
@@ -321,7 +366,7 @@ export const updateStoryScenes = async (storyId: string, scenes: StoryScenes): P
     }
 };
 
-export const getUserStories = async (userId: string): Promise<{ success: boolean; stories?: Story[]; error?: any }> => {
+export const getUserStories = async (userId: string): Promise<ServiceResult<{ stories?: Story[] }>> => {
     try {
         console.log(`Buscando historias para usuario ${userId}`);
         const { data, error } = await supabase
@@ -338,6 +383,11 @@ export const getUserStories = async (userId: string): Promise<{ success: boolean
         const stories: Story[] = data ? data.map((story) => {
             const characterData = story.characters;
             console.log(`[getUserStories_DEBUG] DB raw title for story ${story.id}: "${story.title}"`); // <-- ADD THIS
+            const rawCreationMode = story.creation_mode;
+            const creationMode = rawCreationMode || DEFAULT_CREATION_MODE;
+            const normalizedImageStyle = story.image_style || DEFAULT_IMAGE_STYLE_ID;
+            const hasImageStyleValue = story.image_style !== undefined && story.image_style !== null && story.image_style !== '';
+            const shouldIncludeImageStyle = creationMode === 'image' || hasImageStyleValue || !rawCreationMode;
 
             return {
                 id: story.id,
@@ -349,6 +399,10 @@ export const getUserStories = async (userId: string): Promise<{ success: boolean
                     moral: story.moral,
                     genre: story.genre,
                     duration: story.duration,
+                    creationMode,
+                    imageStyle: shouldIncludeImageStyle
+                        ? normalizedImageStyle
+                        : undefined,
                     characters: [{
                         id: characterData?.id || 'deleted_character',
                         name: characterData?.name || 'Personaje Eliminado',
@@ -384,21 +438,24 @@ export async function generateScenesOnDemand(
     storyId: string,
     content: string,
     title: string,
-    language?: string
+    language?: string,
+    imageStyle?: string
 ): Promise<StoryScenes> {
     console.log(`[generateScenesOnDemand] Generating scenes for story ${storyId} (${title})`);
     
     try {
+        const resolvedImageStyle = imageStyle || DEFAULT_IMAGE_STYLE_ID;
         // Call edge function to generate scenes
         const scenes = await ScenesGenerationService.generateScenesFromContent({
             storyId,
             content,
             title,
-            language: language || 'Español'
+            language: language || 'Español',
+            imageStyle: resolvedImageStyle
         });
 
         // Update database with generated scenes
-        const updateResult = await updateStoryScenes(storyId, scenes);
+        const updateResult = await updateStoryScenes(storyId, scenes, resolvedImageStyle);
         
         if (!updateResult.success) {
             console.error(`[generateScenesOnDemand] Failed to save scenes for story ${storyId}:`, updateResult.error);
@@ -432,15 +489,15 @@ export const getChapterCountForStory = async (storyId: string): Promise<{ count:
 
         return { count: count ?? 0, error: null }; // Devuelve 0 si count es null
 
-    } catch (error: any) {
+    } catch (error) {
         console.error('Error inesperado al contar capítulos:', error);
-        return { count: 0, error };
+        return { count: 0, error: error instanceof Error ? error : new Error('Error desconocido') };
     }
 };
 
 // --- Funciones para Capítulos ---
 
-export const syncChapter = async (chapter: StoryChapter, storyId: string): Promise<{ success: boolean; error?: any }> => {
+export const syncChapter = async (chapter: StoryChapter, storyId: string): Promise<ServiceResult> => {
     console.log("🚀 ~ syncChapter ~ chapter:", chapter)
     try {
         const { error } = await supabase
@@ -466,7 +523,7 @@ export const syncChapter = async (chapter: StoryChapter, storyId: string): Promi
     }
 };
 
-export const getStoryChapters = async (storyId: string): Promise<{ success: boolean; chapters?: StoryChapter[]; error?: any }> => {
+export const getStoryChapters = async (storyId: string): Promise<ServiceResult<{ chapters?: StoryChapter[] }>> => {
     try {
         const { data, error } = await supabase
             .from("story_chapters")
@@ -496,7 +553,7 @@ export const getStoryChapters = async (storyId: string): Promise<{ success: bool
 
 // --- Funciones para Desafíos ---
 
-export const syncChallenge = async (challenge: Challenge): Promise<{ success: boolean; error?: any }> => {
+export const syncChallenge = async (challenge: Challenge): Promise<ServiceResult> => {
     try {
         const { data, error: challengeError } = await supabase
             .from("challenges")
@@ -545,7 +602,7 @@ export const syncChallenge = async (challenge: Challenge): Promise<{ success: bo
 };
 
 
-export const getStoryChallenges = async (storyId: string): Promise<{ success: boolean; challenges?: Challenge[]; error?: any }> => {
+export const getStoryChallenges = async (storyId: string): Promise<ServiceResult<{ challenges?: Challenge[] }>> => {
     try {
         const { data: challengesData, error: challengesError } = await supabase
             .from("challenges")
@@ -557,20 +614,26 @@ export const getStoryChallenges = async (storyId: string): Promise<{ success: bo
             throw challengesError;
         }
 
-        const challenges: Challenge[] = challengesData ? challengesData.map(challengeRecord => ({
-            id: challengeRecord.id,
-            storyId: challengeRecord.story_id,
-            createdAt: challengeRecord.created_at,
-            questions: (challengeRecord.challenge_questions || []).map((q: any) => ({ // Tipar 'q' si es posible
-                id: q.id,
-                question: q.question,
-                options: q.options,
-                correctOptionIndex: q.correct_option_index,
-                explanation: q.explanation,
-                category: q.category,
-                targetLanguage: q.target_language,
-            })),
-        })) : [];
+        const challenges: Challenge[] = challengesData ? challengesData.map(challengeRecord => {
+            const questionRecords: ChallengeQuestionRow[] = Array.isArray(challengeRecord.challenge_questions)
+                ? challengeRecord.challenge_questions as ChallengeQuestionRow[]
+                : [];
+
+            return {
+                id: challengeRecord.id,
+                storyId: challengeRecord.story_id,
+                createdAt: challengeRecord.created_at,
+                questions: questionRecords.map((q) => ({
+                    id: q.id,
+                    question: q.question,
+                    options: q.options,
+                    correctOptionIndex: q.correct_option_index,
+                    explanation: q.explanation,
+                    category: q.category,
+                    targetLanguage: q.target_language,
+                })),
+            };
+        }) : [];
 
         return { success: true, challenges };
     } catch (error) {
@@ -587,7 +650,7 @@ export const syncAudioFile = async (
     chapterId: string | number,
     voiceId: string,
     audioUrl: string,
-): Promise<{ success: boolean; error?: any }> => {
+): Promise<ServiceResult> => {
     try {
         const { error } = await supabase
             .from("audio_files")
@@ -609,7 +672,7 @@ export const syncAudioFile = async (
     }
 };
 
-export const getUserAudios = async (userId: string): Promise<{ success: boolean; audios?: any[]; error?: any }> => { // Ajustar tipo 'audios' si tienes uno específico
+export const getUserAudios = async (userId: string): Promise<ServiceResult<{ audios?: AudioFileRow[] }>> => { // Ajustar tipo 'audios' si tienes uno específico
     try {
         const { data, error } = await supabase
             .from("audio_files")
@@ -620,7 +683,7 @@ export const getUserAudios = async (userId: string): Promise<{ success: boolean;
             console.error("Error obteniendo archivos de audio (RLS?):", error);
             throw error;
         }
-        const audios = data || [];
+        const audios = (data || []) as AudioFileRow[];
         return { success: true, audios: audios };
     } catch (error) {
         console.error("Fallo general en getUserAudios:", error);
@@ -630,7 +693,7 @@ export const getUserAudios = async (userId: string): Promise<{ success: boolean;
 
 // --- Funciones para Preferencias de Voz ---
 
-export const setCurrentVoice = async (userId: string, voiceId: string): Promise<{ success: boolean; error?: any }> => {
+export const setCurrentVoice = async (userId: string, voiceId: string): Promise<ServiceResult> => {
     try {
         // Paso 1: Resetear la voz actual
         await supabase
@@ -659,7 +722,7 @@ export const setCurrentVoice = async (userId: string, voiceId: string): Promise<
     }
 };
 
-export const getCurrentVoice = async (userId: string): Promise<{ success: boolean; voiceId?: string | null; error?: any }> => {
+export const getCurrentVoice = async (userId: string): Promise<ServiceResult<{ voiceId?: string | null }>> => {
     try {
         const { data, error } = await supabase
             .from("user_voices")
@@ -685,7 +748,7 @@ export const getCurrentVoice = async (userId: string): Promise<{ success: boolea
 interface SyncQueueItem {
     table: string;
     operation: "insert" | "update" | "delete";
-    data: any;
+    data: UnknownRecord;
     timestamp: number;
 }
 
@@ -697,9 +760,9 @@ class SyncQueueService {
 
     private constructor() {
         this.loadQueue();
-        if (typeof window !== "undefined" && !window.hasOwnProperty('_syncQueueListenerAdded')) {
+        if (typeof window !== "undefined" && !window._syncQueueListenerAdded) {
             window.addEventListener("online", () => this.processQueue());
-            (window as any)._syncQueueListenerAdded = true;
+            window._syncQueueListenerAdded = true;
         }
     }
 
@@ -733,7 +796,7 @@ class SyncQueueService {
         }
     }
 
-    addToQueue(table: string, operation: "insert" | "update" | "delete", data: any,) {
+    addToQueue(table: string, operation: "insert" | "update" | "delete", data: UnknownRecord) {
         console.log(`Añadiendo a cola: ${operation} en ${table}`, data);
         this.queue.push({ table, operation, data, timestamp: Date.now() });
         this.saveQueue();
@@ -762,19 +825,22 @@ class SyncQueueService {
                     let operationError = null;
                     switch (item.operation) {
                         case "insert":
-                        case "update":
+                        case "update": {
                             const { error } = await supabase.from(item.table).upsert(item.data);
                             operationError = error;
                             break;
-                        case "delete":
-                            if (!item.data?.id) {
+                        }
+                        case "delete": {
+                            const recordId = item.data.id;
+                            if (recordId === undefined || recordId === null) {
                                 console.error("Datos para DELETE sin ID:", item);
                                 operationError = new Error("Datos para DELETE sin ID");
                                 break;
                             }
-                            const { error: deleteError } = await supabase.from(item.table).delete().eq("id", item.data.id);
+                            const { error: deleteError } = await supabase.from(item.table).delete().eq("id", recordId as string | number);
                             operationError = deleteError;
                             break;
+                        }
                     }
                     if (operationError) {
                         console.error(`Error procesando item [${item.operation} ${item.table}]:`, operationError);

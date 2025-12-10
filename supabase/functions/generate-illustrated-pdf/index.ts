@@ -1,16 +1,19 @@
 // supabase/functions/generate-illustrated-pdf/index.ts
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
-import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.39.8';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.8';
 import { corsHeaders } from '../_shared/cors.ts';
 
 console.log(`[GENERATE_ILLUSTRATED_PDF_DEBUG] Function generate-illustrated-pdf initializing...`);
 
 const IMAGE_BUCKET = 'images-stories';
+// Temporary compatibility while backfill finishes: signed fallback to legacy bucket
 const LEGACY_IMAGE_BUCKET = 'story-images';
+const LEGACY_EXTENSIONS = ['jpeg', 'jpg', 'png', 'webp'] as const;
 const REQUIRED_IMAGE_TYPES = ['cover', 'scene_1', 'scene_2', 'scene_3', 'scene_4', 'closing'] as const;
 
 type RequiredImageType = typeof REQUIRED_IMAGE_TYPES[number];
+type LegacyExtension = typeof LEGACY_EXTENSIONS[number];
 
 interface StoryImageRecord {
   image_type: RequiredImageType | string;
@@ -39,55 +42,57 @@ function normalizeChapterId(chapterId: string | null | undefined, storyId: strin
   return chapterId === storyId ? null : chapterId;
 }
 
-interface StorageObject {
-  name: string;
-  metadata?: {
-    mimetype?: string | null;
-  } | null;
+function inferMimeTypeFromExtension(extension: LegacyExtension): string {
+  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
+  if (extension === 'png') return 'image/png';
+  if (extension === 'webp') return 'image/webp';
+  return 'application/octet-stream';
 }
 
-async function findLegacyImageFromStorage(
-  supabaseAdmin: SupabaseClient,
+async function findLegacyImage(
+  supabaseAdmin: ReturnType<typeof createClient>,
   storyId: string,
   normalizedChapterId: string | null,
+  rawChapterId: string,
   imageType: RequiredImageType,
-): Promise<StoryImageRecord | null> {
-  const searchPrefixes = normalizedChapterId ? [`${storyId}/${normalizedChapterId}`, storyId] : [storyId];
-  const bucketsToCheck = [LEGACY_IMAGE_BUCKET, IMAGE_BUCKET];
+) {
+  const chapterCandidates = new Set<string>();
+  chapterCandidates.add(storyId);
 
-  for (const bucket of bucketsToCheck) {
-    for (const prefix of searchPrefixes) {
-      const directory = prefix.trim();
-      const { data, error } = await supabaseAdmin.storage.from(bucket).list(directory, { limit: 50 });
+  if (normalizedChapterId) {
+    chapterCandidates.add(`${storyId}/${normalizedChapterId}`);
+  }
+  if (rawChapterId && normalizedChapterId !== rawChapterId) {
+    chapterCandidates.add(`${storyId}/${rawChapterId}`);
+  }
 
-      if (error) {
-        console.warn(
-          `[GENERATE_ILLUSTRATED_PDF_WARN] Unable to list storage objects for ${bucket}/${directory}:`,
-          error.message ?? error,
-        );
-        continue;
-      }
+  for (const basePath of chapterCandidates) {
+    for (const extension of LEGACY_EXTENSIONS) {
+      const candidatePath = `${basePath}/${imageType}.${extension}`;
+      const { data, error } = await supabaseAdmin.storage.from(LEGACY_IMAGE_BUCKET).createSignedUrl(candidatePath, 3600);
 
-      const objects = Array.isArray(data) ? (data as StorageObject[]) : [];
-      const match = objects.find((item) => typeof item.name === 'string' && item.name.startsWith(`${imageType}.`));
-
-      if (match) {
-        const storagePath = directory.length > 0 ? `${directory}/${match.name}` : match.name;
-        const fromChapterFolder = normalizedChapterId !== null && directory.includes(`/${normalizedChapterId}`);
+      if (!error && data?.signedUrl) {
+        const { data: publicData } = supabaseAdmin.storage.from(LEGACY_IMAGE_BUCKET).getPublicUrl(candidatePath);
 
         return {
-          image_type: imageType,
-          storage_path: storagePath,
-          storage_bucket: bucket,
-          provider: bucket === LEGACY_IMAGE_BUCKET ? 'storage_legacy' : 'storage_normalized',
-          fallback_used: true,
-          mime_type: match.metadata?.mimetype ?? null,
-          original_resolution: null,
-          final_resolution: null,
-          resized_from: null,
-          resized_to: null,
-          latency_ms: null,
-          chapter_id: fromChapterFolder ? normalizedChapterId : null,
+          record: {
+            image_type: imageType,
+            storage_path: candidatePath,
+            storage_bucket: LEGACY_IMAGE_BUCKET,
+            provider: 'legacy_storage',
+            fallback_used: true,
+            mime_type: inferMimeTypeFromExtension(extension),
+            original_resolution: null,
+            final_resolution: null,
+            resized_from: null,
+            resized_to: null,
+            latency_ms: null,
+            chapter_id: normalizedChapterId,
+          },
+          access: {
+            signedUrl: data.signedUrl,
+            publicUrl: publicData?.publicUrl ?? null,
+          },
         };
       }
     }
@@ -112,7 +117,7 @@ serve(async (req: Request) => {
     );
 
     const requestBody = await req.json();
-    const { storyId, chapterId, title, author, content, userId } = requestBody;
+    const { storyId, chapterId, title, author, content, userId, pdfUrl } = requestBody;
 
     console.log(`[GENERATE_ILLUSTRATED_PDF_DEBUG] Received request for story ${storyId}, chapter ${chapterId}, user ${userId}`);
 
@@ -133,7 +138,7 @@ serve(async (req: Request) => {
     const { data: metadataRows, error: metadataError } = await supabaseAdmin
       .from('story_images')
       .select(
-        'image_type, storage_path, provider, fallback_used, mime_type, original_resolution, final_resolution, resized_from, resized_to, latency_ms, chapter_id'
+        'image_type, storage_path, storage_bucket, provider, fallback_used, mime_type, original_resolution, final_resolution, resized_from, resized_to, latency_ms, chapter_id'
       )
       .eq('story_id', storyId)
       .in('image_type', requiredImageFilters);
@@ -149,6 +154,8 @@ serve(async (req: Request) => {
     const records = Array.isArray(metadataRows) ? (metadataRows as StoryImageRecord[]) : [];
     const selectedRecords: Record<RequiredImageType, StoryImageRecord> = {} as Record<RequiredImageType, StoryImageRecord>;
     let missingTypes: RequiredImageType[] = [];
+    const preResolvedAccess: Partial<Record<RequiredImageType, { signedUrl: string; publicUrl: string | null }>> = {};
+    const legacyFallbackUsed: RequiredImageType[] = [];
 
     for (const imageType of REQUIRED_IMAGE_TYPES) {
       const rowsForType = records.filter((row) => row.image_type === imageType);
@@ -166,34 +173,44 @@ serve(async (req: Request) => {
 
     if (missingTypes.length > 0) {
       console.warn(
-        '[GENERATE_ILLUSTRATED_PDF_WARN] Normalized metadata missing for some images, attempting storage fallback:',
-        missingTypes,
+        '[GENERATE_ILLUSTRATED_PDF_WARN] Missing normalized .jpeg images in images-stories; attempting legacy signed fallback.',
+        { storyId, chapterId: normalizedChapterId, missingTypes },
       );
 
-      for (const imageType of missingTypes) {
-        const fallbackRecord = await findLegacyImageFromStorage(supabaseAdmin, storyId, normalizedChapterId, imageType);
-        if (fallbackRecord?.storage_path) {
-          console.log(
-            `[GENERATE_ILLUSTRATED_PDF_INFO] Found legacy storage image for ${imageType} at ${fallbackRecord.storage_path}`,
-          );
-          selectedRecords[imageType] = fallbackRecord;
+      for (const imageType of [...missingTypes]) {
+        const legacy = await findLegacyImage(supabaseAdmin, storyId, normalizedChapterId, chapterId, imageType);
+        if (legacy) {
+          selectedRecords[imageType] = legacy.record;
+          preResolvedAccess[imageType] = legacy.access;
+          legacyFallbackUsed.push(imageType);
         }
       }
 
-      missingTypes = REQUIRED_IMAGE_TYPES.filter((imageType) => {
-        const record = selectedRecords[imageType];
-        return !record || !record.storage_path;
-      });
+      missingTypes = missingTypes.filter((type) => !selectedRecords[type]);
     }
 
     if (missingTypes.length > 0) {
-      console.warn('[GENERATE_ILLUSTRATED_PDF_WARN] Missing normalized images after storage fallback:', missingTypes);
+      console.warn(
+        '[GENERATE_ILLUSTRATED_PDF_WARN] Normalized images missing and legacy storage did not have fallbacks:',
+        { storyId, chapterId: normalizedChapterId, missingTypes, legacyFallbackUsed },
+      );
       return new Response(
         JSON.stringify({
-          error: 'Faltan ilustraciones normalizadas para generar el PDF',
+          error: 'Faltan ilustraciones normalizadas (.jpeg) en images-stories para generar el PDF',
           missingImages: missingTypes,
+          bucket: IMAGE_BUCKET,
+          expectedFormat: 'jpeg',
+          legacyFallbackAttempted: true,
+          action: 'Ejecuta el backfill a images-stories o regenera las ilustraciones antes de crear el PDF',
         }),
         { status: 422, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
+
+    if (legacyFallbackUsed.length > 0) {
+      console.log(
+        '[GENERATE_ILLUSTRATED_PDF_INFO] Applied legacy story-images fallback for:',
+        { storyId, chapterId: normalizedChapterId, legacyFallbackUsed },
       );
     }
 
@@ -210,26 +227,35 @@ serve(async (req: Request) => {
       const storagePath = record.storage_path!;
       const bucket = record.storage_bucket ?? IMAGE_BUCKET;
 
-      const { data: signedData, error: signedError } = await supabaseAdmin.storage
-        .from(bucket)
-        .createSignedUrl(storagePath, 3600);
+      let signedUrl = preResolvedAccess[imageType]?.signedUrl ?? null;
+      let publicUrl = preResolvedAccess[imageType]?.publicUrl ?? null;
 
-      if (signedError || !signedData?.signedUrl) {
-        console.error(`[GENERATE_ILLUSTRATED_PDF_ERROR] Unable to create signed URL for ${imageType}:`, signedError);
-        return new Response(
-          JSON.stringify({ error: `No se pudo generar acceso temporal a la ilustración ${imageType}` }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-        );
+      if (!signedUrl) {
+        const { data: signedData, error: signedError } = await supabaseAdmin.storage
+          .from(bucket)
+          .createSignedUrl(storagePath, 3600);
+
+        if (signedError || !signedData?.signedUrl) {
+          console.error(`[GENERATE_ILLUSTRATED_PDF_ERROR] Unable to create signed URL for ${imageType}:`, signedError);
+          return new Response(
+            JSON.stringify({ error: `No se pudo generar acceso temporal a la ilustración ${imageType}` }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+          );
+        }
+
+        signedUrl = signedData.signedUrl;
       }
 
-      const { data: publicData } = supabaseAdmin.storage.from(bucket).getPublicUrl(storagePath);
-      const publicUrl = publicData?.publicUrl ?? null;
+      if (!publicUrl) {
+        const { data: publicData } = supabaseAdmin.storage.from(bucket).getPublicUrl(storagePath);
+        publicUrl = publicData?.publicUrl ?? null;
+      }
 
-      imageUrls[imageType] = publicUrl ?? signedData.signedUrl;
+      imageUrls[imageType] = publicUrl ?? signedUrl;
       imageMetadata[imageType] = {
         bucket,
         storagePath,
-        signedUrl: signedData.signedUrl,
+        signedUrl,
         publicUrl,
         provider: record.provider,
         fallbackUsed: record.fallback_used,
@@ -245,6 +271,13 @@ serve(async (req: Request) => {
 
     console.log('[GENERATE_ILLUSTRATED_PDF_INFO] Normalized illustrations ready. Proceeding with PDF registration.');
 
+    const resolvedPdfUrl = typeof pdfUrl === 'string' && pdfUrl.trim().length > 0 ? pdfUrl.trim() : null;
+    const resolvedStatus = resolvedPdfUrl ? 'completed' : 'pending';
+
+    if (!resolvedPdfUrl) {
+      console.log('[GENERATE_ILLUSTRATED_PDF_INFO] No pdfUrl provided; recording request as pending');
+    }
+
     const { error: dbError } = await supabaseAdmin
       .from('illustrated_pdfs')
       .insert({
@@ -253,8 +286,8 @@ serve(async (req: Request) => {
         user_id: userId,
         title,
         author: author || null,
-        pdf_url: null,
-        status: 'completed',
+        pdf_url: resolvedPdfUrl,
+        status: resolvedStatus,
         generated_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
@@ -269,6 +302,7 @@ serve(async (req: Request) => {
         message: 'Illustrated PDF metadata processed successfully',
         imageUrls,
         imageMetadata,
+        legacyFallbackUsed,
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

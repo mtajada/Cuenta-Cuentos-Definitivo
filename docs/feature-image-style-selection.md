@@ -111,42 +111,42 @@ Decisiones cerradas (Fase 0):
 - [x] Definir helper de catálogo compartido (frontend + Supabase `_shared/illustration-styles.ts`) para descriptores y mapeos.
 
 ### Fase 1 – Modelado y contratos
-- [ ] Ampliar tipos (`src/types/index.ts`): `creationMode?: 'standard' | 'image'`, `imageStyle?: string` en `StoryOptions` y reflejar en `Story`/`StoryWithChapters`.
-- [ ] Actualizar store types (`src/store/types/storeTypes.ts`): añadir campos y firmas de setters; garantizar que `reset` preserve o restablezca defaults sin perder la última elección guardada en persistencia.
-- [ ] Store (`src/store/storyOptions/storyOptionsStore.ts`): defaults (`creationMode: 'standard'`, `imageStyle: 'watercolor_child'`), setters `setCreationMode`/`setImageStyle`, reset y persistencia (recordar última elección).
-- [ ] Payloads `GenerateStoryParams` + `GenerateStoryService.generateStoryWithAI`: incluir `imageStyle`.
-- [ ] `storyGenerator.generateStory`: propagar `creationMode`/`imageStyle` en `payload.options`.
-- [ ] Supabase service (`src/services/supabase.ts`): `syncStory`/`getUserStories` envían y leen `image_style` hacia/desde `story.options.imageStyle`; ajustar `syncQueue` para incluir el campo.
-- [ ] Definir fallback al leer historias: si `image_style` es `NULL`, usar `watercolor_child`.
+- [x] Ampliar tipos (`src/types/index.ts`): `creationMode?: 'standard' | 'image'`, `imageStyle?: string` en `StoryOptions` y reflejar en `Story`/`StoryWithChapters`.
+- [x] Actualizar store types (`src/store/types/storeTypes.ts`): añadir campos y firmas de setters; garantizar que `reset` preserve o restablezca defaults sin perder la última elección guardada en persistencia.
+- [x] Store (`src/store/storyOptions/storyOptionsStore.ts`): defaults (`creationMode: 'standard'`, `imageStyle: 'watercolor_child'`), setters `setCreationMode`/`setImageStyle`, reset y persistencia (recordar última elección).
+- [x] Payloads `GenerateStoryParams` + `GenerateStoryService.generateStoryWithAI`: incluir `imageStyle`.
+- [x] `storyGenerator.generateStory`: propagar `creationMode`/`imageStyle` en `payload.options`.
+- [x] Supabase service (`src/services/supabase.ts`): `syncStory`/`getUserStories` envían y leen `image_style` hacia/desde `story.options.imageStyle`; ajustar `syncQueue` para incluir el campo.
+- [x] Definir fallback al leer historias: si `image_style` es `NULL`, usar `watercolor_child`.
 
 ### Fase 2 – UI/UX de selección
-- [ ] Nueva ruta/pantalla `StoryCreationMode.tsx` (grid de modo + estilos con selección única y miniaturas estáticas).
-- [ ] Registrar ruta en `App.tsx`.
-- [ ] CTA de `Home` y `IllustratedBooksModal` apuntan a `/creation-mode` (no directo a `/duration`).
-- [ ] Botón Continuar activo solo con modo; si modo `image`, requiere estilo seleccionado; setear defaults (modo `image` + `watercolor_child` al entrar desde Libros ilustrados).
-- [ ] Ayuda/tooltip: “El estilo se aplicará a portada y escenas.”
+- [x] Nueva ruta/pantalla `StoryCreationMode.tsx` (grid de modo + estilos con selección única y miniaturas estáticas).
+- [x] Registrar ruta en `App.tsx`.
+- [x] CTA de `Home` y `IllustratedBooksModal` apuntan a `/creation-mode` (no directo a `/duration`).
+- [x] Botón Continuar activo solo con modo; si modo `image`, requiere estilo seleccionado; setear defaults (modo `image` + `watercolor_child` al entrar desde Libros ilustrados).
+- [x] Ayuda/tooltip: “El estilo se aplicará a portada y escenas.”
 
 ### Fase 3 – Propagación y consumo en frontend
-- [ ] `GeneratingStory.tsx`: mostrar `creationMode`/`imageStyle` en el resumen.
-- [ ] `StoryPdfService`: usar `story.options.imageStyle || 'watercolor_child'` como fallback y pasar `imageStyle` a generación/regeneración de escenas e imágenes.
-- [ ] `ScenesGenerationService.generateScenesFromContent`: aceptar y enviar `imageStyle`.
-- [ ] Helper catálogo frontend (`src/lib/image-styles.ts`): ids, labels, descriptores de prompt, mapeo a `openAiStyle`; compartir con backend.
-- [ ] `imageProviderConfig` o wrapper: si `imageStyle` es realista → `openAiStyle = 'natural'`; resto `vivid`; exponer `styleId` a `ImageGenerationService.callGenerateImageEdge`.
-- [ ] `ImageGenerationService`: permitir `openAiStyle` dinámico según `imageStyle`, propagar `styleId` al body de `generate-image`.
+- [x] `GeneratingStory.tsx`: mostrar `creationMode`/`imageStyle` en el resumen.
+- [x] `StoryPdfService`: usar `story.options.imageStyle || 'watercolor_child'` como fallback y pasar `imageStyle` a generación/regeneración de escenas e imágenes.
+- [x] `ScenesGenerationService.generateScenesFromContent`: aceptar y enviar `imageStyle`.
+- [x] Helper catálogo frontend (`src/lib/image-styles.ts`): ids, labels, descriptores de prompt, mapeo a `openAiStyle`; compartir con backend.
+- [x] `imageProviderConfig` o wrapper: si `imageStyle` es realista → `openAiStyle = 'natural'`; resto `vivid`; exponer `styleId` a `ImageGenerationService.callGenerateImageEdge`.
+- [x] `ImageGenerationService`: permitir `openAiStyle` dinámico según `imageStyle`, propagar `styleId` al body de `generate-image`.
 
 ### Fase 4 – Backend / Edge Functions
-- [ ] Migración DB: `ALTER TABLE public.stories ADD COLUMN image_style text DEFAULT 'watercolor_child';` + comentario; opcional índice b-tree.
-- [ ] `generate-story/index.ts`: validar `imageStyle` (lista permitida), guardar en DB, pasar a prompts.
-- [ ] `generate-story/prompt.ts`: sustituir prefix fijo de acuarela por descriptor dinámico según `imageStyle` (usar helper compartido) y eliminar referencias de marca.
-- [ ] `generate-scenes-from-content/index.ts`: aceptar `imageStyle`, default al guardado en la historia (o `watercolor_child`), pasar a plantilla.
-- [ ] `generate-scenes-from-content/prompt.ts`: usar descriptor dinámico, no asumir acuarela.
-- [ ] `generate-image/index.ts`: aceptar `styleId` opcional, mapear a `style` OpenAI (`vivid|natural`), registrar en metadata; opcional: persistir `image_style` en `story_images` o al menos devolver `styleId` en la respuesta.
-- [ ] Helper compartido `_shared/illustration-styles.ts`: catálogo único para prompts y validación.
+- [x] Migración DB: `ALTER TABLE public.stories ADD COLUMN image_style text DEFAULT 'watercolor_child';` + comentario; opcional índice b-tree.
+- [x] `generate-story/index.ts`: validar `imageStyle` (lista permitida), guardar en DB, pasar a prompts.
+- [x] `generate-story/prompt.ts`: sustituir prefix fijo de acuarela por descriptor dinámico según `imageStyle` (usar helper compartido) y eliminar referencias de marca.
+- [x] `generate-scenes-from-content/index.ts`: aceptar `imageStyle`, default al guardado en la historia (o `watercolor_child`), pasar a plantilla.
+- [x] `generate-scenes-from-content/prompt.ts`: usar descriptor dinámico, no asumir acuarela.
+- [x] `generate-image/index.ts`: aceptar `styleId` opcional, mapear a `style` OpenAI (`vivid|natural`), registrar en metadata; opcional: persistir `image_style` en `story_images` o al menos devolver `styleId` en la respuesta.
+- [x] Helper compartido `_shared/illustration-styles.ts`: catálogo único para prompts y validación.
 
 ### Fase 5 – Retrocompatibilidad y datos existentes
-- [ ] Backfill opcional: set `image_style = 'watercolor_child'` en historias previas.
-- [ ] Verificar que PDFs ilustrados antiguos funcionan con fallback y no fallan generación.
-- [ ] Confirmar que RLS no requiere cambios (columna nueva en `stories`).
+- [x] Backfill opcional: set `image_style = 'watercolor_child'` en historias previas.
+- [x] Verificar que PDFs ilustrados antiguos funcionan con fallback y no fallan generación.
+- [x] Confirmar que RLS no requiere cambios (columna nueva en `stories`).
 
 ### Fase 6 – QA integral
 - [ ] UI: selección modo/estilo, navegación adelante/atrás, persistencia local, botones deshabilitados correctamente.
@@ -156,8 +156,11 @@ Decisiones cerradas (Fase 0):
 - [ ] Regenerar escenas on-demand desde `StoryPdfService` y verificar estilo aplicado.
 - [ ] Historias antiguas: generar PDF ilustrado → usa fallback, sin errores.
 
+Estado actual Fase 6 (27 Feb 2025):
+- Bloqueado: la Edge Function `generate-story` está respondiendo 200 sin `scenes` (solo `{content, title}` con valores por defecto), por lo que el front cae en error al generar. Probado con user `4zgz2000@gmail.com` en entorno prod (`vljseinehlxrvlghxcyk`). Sin `scenes` no podemos validar UI completa, payloads, prompts ni metadatos de imágenes.
+
 ### Fase 7 – Cierre y entrega
-- [ ] `npm run lint` y `npm run build` OK.
-- [ ] Migración aplicada en Supabase; revisar secrets existentes (sin nuevas env vars).
-- [ ] Actualizar `docs/EDGE_FUNCTIONS.md` con campo `image_style` y catálogo.
-- [ ] Changelog: entrada breve describiendo la selección de estilos y propagación a imágenes.
+- [x] `npm run lint` y `npm run build` OK.
+- [x] Migración aplicada en Supabase; revisar secrets existentes (sin nuevas env vars).
+- [x] Actualizar `docs/EDGE_FUNCTIONS.md` con campo `image_style` y catálogo.
+- [x] Changelog: entrada breve describiendo la selección de estilos y propagación a imágenes.

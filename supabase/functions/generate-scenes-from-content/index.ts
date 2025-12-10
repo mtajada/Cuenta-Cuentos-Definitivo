@@ -1,10 +1,17 @@
 // supabase/functions/generate-scenes-from-content/index.ts
 // Edge Function to generate scenes structure from existing story content
-import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
-import { corsHeaders } from '../_shared/cors.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.8';
-import OpenAI from "npm:openai@^4.33.0";
+import { serve } from "std/http/server.ts";
+import { corsHeaders } from "../_shared/cors.ts";
+import { createClient } from "supabase";
+import OpenAI from "openai";
 import { createScenesPrompt } from './prompt.ts';
+import {
+  DEFAULT_IMAGE_STYLE_ID,
+  getPromptDescriptorForStyleId,
+  getValidIllustrationStyleIds,
+  isValidIllustrationStyleId,
+  normalizeIllustrationStyleId,
+} from '../_shared/illustration-styles.ts';
 
 // Interface for request body
 interface GenerateScenesRequestBody {
@@ -12,6 +19,7 @@ interface GenerateScenesRequestBody {
   content: string;
   title: string;
   language?: string;
+  imageStyle?: string;
 }
 
 // Interface for scenes structure
@@ -82,6 +90,7 @@ serve(async (req: Request) => {
   }
 
   let userId: string | null = null;
+  let resolvedImageStyle = DEFAULT_IMAGE_STYLE_ID;
 
   try {
     // Authentication
@@ -108,12 +117,20 @@ serve(async (req: Request) => {
 
     // Parse and validate request body
     let params: GenerateScenesRequestBody;
+    let requestedImageStyle: string | null = null;
     try {
       params = await req.json();
       console.log(`[${functionVersion}] Params received for story: ${params.storyId}`);
       
       if (!params.storyId || !params.content || !params.title) {
         throw new Error("Parámetros inválidos: se requiere storyId, content y title.");
+      }
+      
+      requestedImageStyle = typeof params.imageStyle === 'string' ? params.imageStyle : null;
+      if (requestedImageStyle && !isValidIllustrationStyleId(requestedImageStyle)) {
+        throw new Error(
+          `imageStyle inválido. Valores permitidos: ${getValidIllustrationStyleIds().join(', ')}`,
+        );
       }
       
       if (typeof params.content !== 'string' || params.content.length < 50) {
@@ -133,7 +150,7 @@ serve(async (req: Request) => {
     // Verify story ownership
     const { data: storyData, error: storyError } = await supabaseAdmin
       .from('stories')
-      .select('user_id, scenes')
+      .select('user_id, scenes, image_style')
       .eq('id', params.storyId)
       .single();
 
@@ -151,11 +168,26 @@ serve(async (req: Request) => {
       });
     }
 
-    // Check if scenes already exist (idempotency)
-    if (storyData.scenes && typeof storyData.scenes === 'object') {
+    const storyImageStyle =
+      typeof (storyData as { image_style?: string }).image_style === 'string'
+        ? (storyData as { image_style?: string }).image_style
+        : null;
+    const storedImageStyle = normalizeIllustrationStyleId(storyImageStyle);
+    const overrideImageStyle = requestedImageStyle
+      ? normalizeIllustrationStyleId(requestedImageStyle)
+      : null;
+    const styleChanged = overrideImageStyle !== null && overrideImageStyle !== storedImageStyle;
+    resolvedImageStyle = overrideImageStyle ?? storedImageStyle;
+    console.log(
+      `[${functionVersion}] Image style resolved to ${resolvedImageStyle} (requested: ${requestedImageStyle ?? 'none'}, stored: ${storyImageStyle ?? 'none'}, overrideApplied: ${styleChanged ? 'yes' : 'no'})`,
+    );
+
+    // Check if scenes already exist (idempotency) unless style override requires regeneration
+    if (storyData.scenes && typeof storyData.scenes === 'object' && !styleChanged) {
       console.log(`[${functionVersion}] Story ${params.storyId} already has scenes. Skipping generation.`);
       return new Response(JSON.stringify({ 
         scenes: storyData.scenes,
+        imageStyle: resolvedImageStyle,
         message: 'Scenes already exist for this story.'
       }), {
         status: 200,
@@ -163,9 +195,20 @@ serve(async (req: Request) => {
       });
     }
 
+    if (styleChanged) {
+      console.log(
+        `[${functionVersion}] Style override (${overrideImageStyle}) differs from stored (${storedImageStyle}); regenerating scenes.`,
+      );
+    }
+
     // Generate scenes using AI
     const language = params.language || 'Español';
-    const prompt = createScenesPrompt(params.title, params.content, language);
+    const prompt = createScenesPrompt(
+      params.title,
+      params.content,
+      language,
+      getPromptDescriptorForStyleId(resolvedImageStyle),
+    );
 
     console.log(`[${functionVersion}] Calling AI (${TEXT_MODEL_GENERATE}) to generate scenes. Prompt length: ${prompt.length}`);
 
@@ -215,8 +258,37 @@ serve(async (req: Request) => {
       throw new Error('No se pudieron generar las scenes.');
     }
 
-    // Return scenes (the client will update the database)
-    return new Response(JSON.stringify({ scenes }), {
+    // Persist scenes and, when appropriate, the image style (especially when an override is applied)
+    const shouldPersistImageStyle =
+      styleChanged || !isValidIllustrationStyleId(storyImageStyle);
+
+    const updatePayload: Record<string, unknown> = {
+      scenes,
+      updated_at: new Date(),
+    };
+
+    if (shouldPersistImageStyle) {
+      updatePayload.image_style = resolvedImageStyle;
+    }
+
+    const { error: persistError } = await supabaseAdmin
+      .from('stories')
+      .update(updatePayload)
+      .eq('id', params.storyId);
+
+    if (persistError) {
+      console.error(
+        `[${functionVersion}] Failed to persist scenes/image_style for story ${params.storyId}:`,
+        persistError,
+      );
+      throw new Error('No se pudo guardar los scenes o el estilo de imagen actualizado.');
+    }
+
+    console.log(
+      `[${functionVersion}] Scenes persisted for story ${params.storyId} with image style ${resolvedImageStyle}. Style persisted: ${shouldPersistImageStyle ? 'yes' : 'no'}`,
+    );
+
+    return new Response(JSON.stringify({ scenes, imageStyle: resolvedImageStyle }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
@@ -243,4 +315,3 @@ serve(async (req: Request) => {
     });
   }
 });
-

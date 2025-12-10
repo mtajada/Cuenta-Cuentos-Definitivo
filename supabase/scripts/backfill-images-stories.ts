@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.8';
 import { normalizeForLayout } from '../functions/generate-image/normalize.ts';
+import { formatCanvasLayout } from '../functions/_shared/image-layout.ts';
 
 const SOURCE_BUCKET = 'story-images';
 const TARGET_BUCKET = 'images-stories';
@@ -264,6 +265,7 @@ async function upsertStoryImageMetadata(input: {
     resized_to: input.resizedTo,
     latency_ms: null,
     user_id: input.userId,
+    status: 'uploaded',
   };
 
   const { error: insertError } = await supabase.from('story_images').insert(payload);
@@ -370,7 +372,7 @@ async function processLegacyImage(entry: StorageEntry) {
       storagePath: targetPath,
       mimeType: normalized.mimeType,
       originalResolution: formatResolution(normalized.originalResolution),
-      finalResolution: formatResolution(normalized.finalResolution),
+      finalResolution: formatCanvasLayout(normalized.finalResolution),
       resizedFrom: formatResolution(normalized.resizedFrom ?? null),
       resizedTo: formatResolution(normalized.resizedTo ?? null),
       userId,

@@ -2,6 +2,8 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
 const ADMIN_CODE = 'TaleMe2025';
+const DEFAULT_IMAGE_STYLE_ID = 'watercolor_child';
+const DEFAULT_CREATION_MODE = 'standard';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -63,7 +65,7 @@ serve(async (req) => {
     // Fetch story (bypasses RLS)
     const { data: storyData, error: storyError } = await supabaseAdmin
       .from('stories')
-      .select('*')
+      .select('*, image_style, creation_mode')
       .eq('id', storyId)
       .single();
 
@@ -107,16 +109,33 @@ serve(async (req) => {
       }
     }
 
+    const creationMode =
+      storyData.creation_mode ||
+      (parsedOptions?.creationMode as string | undefined) ||
+      DEFAULT_CREATION_MODE;
+    const imageStyle =
+      (parsedOptions?.imageStyle as string | undefined) ||
+      storyData.image_style ||
+      DEFAULT_IMAGE_STYLE_ID;
+
+    const optionsWithStyle = {
+      ...parsedOptions,
+      creationMode,
+      imageStyle: creationMode === 'image' ? imageStyle : undefined,
+    };
+
     // Construct response
     const story = {
       id: storyData.id,
       title: storyData.title,
       content: storyData.content,
       audioUrl: storyData.audio_url,
-      options: parsedOptions,
+      options: optionsWithStyle,
       createdAt: storyData.created_at,
       additional_details: storyData.additional_details,
       user_id: storyData.user_id,
+      image_style: storyData.image_style ?? imageStyle ?? DEFAULT_IMAGE_STYLE_ID,
+      creation_mode: creationMode,
       chapters: chaptersData || [],
       hasMultipleChapters: (chaptersData?.length || 0) > 0,
       chaptersCount: chaptersData?.length || 0
@@ -146,4 +165,3 @@ serve(async (req) => {
     );
   }
 });
-

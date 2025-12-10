@@ -70,9 +70,10 @@ const SettingsPage: React.FC = () => {
             } else {
                 throw new Error('No se recibió URL de checkout.');
             }
-        } catch (error: any) {
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Error desconocido';
             console.error(`Error creating ${item} checkout session:`, error);
-            toast({ title: 'Error', description: `No se pudo iniciar el pago: ${error.message}`, variant: 'destructive' });
+            toast({ title: 'Error', description: `No se pudo iniciar el pago: ${message}`, variant: 'destructive' });
             setIsCheckoutLoading(false);
         }
     };
@@ -94,9 +95,10 @@ const SettingsPage: React.FC = () => {
             } else {
                 throw new Error('No se recibió URL del portal de cliente.');
             }
-        } catch (error: any) {
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Error desconocido';
             console.error("Error creating customer portal session:", error);
-            toast({ title: 'Error', description: `No se pudo redirigir a la gestión de suscripción: ${error.message}`, variant: 'destructive' });
+            toast({ title: 'Error', description: `No se pudo redirigir a la gestión de suscripción: ${message}`, variant: 'destructive' });
             setIsPortalLoading(false);
         } // No finally block needed for isLoading as page redirects on success
     };

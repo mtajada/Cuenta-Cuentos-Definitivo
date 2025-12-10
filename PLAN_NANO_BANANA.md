@@ -154,14 +154,14 @@ Usar **Gemini 2.5 Flash Image** (alias interno “Nano Banana”) como proveedor
 
 ## Fase 3 – Persistencia y limpieza
 
-- [ ] Ejecutar backfill en `images-stories`
+- [ ] Ejecutar backfill en `images-stories` (pendiente de correr `supabase/scripts/backfill-images-stories.ts` con `BACKFILL_APPLY=true`/`DELETE_SOURCE=false` en el proyecto Supabase; validar credenciales `SUPABASE_SERVICE_ROLE_KEY`. El fallback legacy en `generate-illustrated-pdf` quedó deshabilitado: si faltan assets normalizados la función responderá 422 hasta completar la migración.)
   - [x] Reconvertir las imágenes existentes en `story-images` a JPEG mediante la misma rutina de normalización antes de moverlas y renombrarlas a `.jpeg`.
   - [x] Registrar metadatos (`mimeType`, `originalResolution`, `finalResolution`, `storagePath`) para ilustraciones históricas.
   - [x] Actualizar la Edge Function `generate-illustrated-pdf` y cualquier script que lea `story-images/*.png` para que utilicen `images-stories` y las nuevas rutas `.jpeg` antes del backfill.
-- [ ] Actualizar documentación clave
+- [x] Actualizar documentación clave
   - [x] Revisar `docs/ADMIN_ILLUSTRATED_PDF_PANEL.md` incorporando nuevo flujo y métricas.
   - [x] Actualizar `docs/EDGE_FUNCTIONS.md` detallando el pipeline Gemini→normalización→OpenAI fallback, la librería de normalización elegida y la estructura de metadatos almacenados.
-- [ ] Depurar referencias legacy
+- [x] Depurar referencias legacy
   - [x] Reemplazar cualquier uso del bucket `story-images` por `images-stories` (incluyendo `generate-illustrated-pdf` y scripts asociados).
   - [x] Eliminar flujos que descargaban imágenes desde el frontend en lugar de usar URLs públicas normalizadas.
 

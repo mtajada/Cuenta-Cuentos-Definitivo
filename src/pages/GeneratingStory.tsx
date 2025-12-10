@@ -6,10 +6,15 @@ import { useStoriesStore } from "../store/stories/storiesStore";
 import { useStoryOptionsStore } from "../store/storyOptions/storyOptionsStore";
 import IconLoadingAnimation from "../components/IconLoadingAnimation";
 import PageTransition from "../components/PageTransition";
+import { getImageStyleLabel } from "@/lib/image-styles";
 
 export default function GeneratingStory() {
   const navigate = useNavigate();
   const { currentStoryOptions } = useStoryOptionsStore();
+  const creationMode = currentStoryOptions.creationMode ?? "standard";
+  const creationModeLabel = creationMode === "image" ? "Creación con imagen" : "Cuento estándar";
+  const isImageMode = creationMode === "image";
+  const imageStyleLabel = isImageMode ? getImageStyleLabel(currentStoryOptions.imageStyle) : "No aplica";
   
   useEffect(() => {
     const generate = async () => {
@@ -77,6 +82,18 @@ export default function GeneratingStory() {
                   <p className="text-sm truncate">{currentStoryOptions.duration}</p>
                 </div>
               )}
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="bg-[#6DD3A8]/20 p-2 rounded-lg border border-[#6DD3A8]/30">
+                <p className="text-xs font-semibold text-[#0F766E]">Modo</p>
+                <p className="text-sm truncate">{creationModeLabel}</p>
+              </div>
+
+              <div className={`p-2 rounded-lg border ${isImageMode ? "bg-[#FFB347]/20 border-[#FFB347]/40" : "bg-gray-100 border-gray-200"}`}>
+                <p className="text-xs font-semibold text-[#C2410C]">Estilo de imagen</p>
+                <p className="text-sm truncate">{imageStyleLabel}</p>
+              </div>
             </div>
           </motion.div>
 

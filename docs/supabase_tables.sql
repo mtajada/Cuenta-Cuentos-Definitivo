@@ -45,6 +45,33 @@ CREATE TABLE public.story_chapters (
   CONSTRAINT story_chapters_story_id_fkey FOREIGN KEY (story_id) REFERENCES stories(id)
 );
 
+-- Metadatos de ilustraciones normalizadas (ratios/proveedores detallados en docs/EDGE_FUNCTIONS.md)
+CREATE TABLE public.story_images (
+  id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
+  story_id uuid NOT NULL,
+  chapter_id uuid NULL,
+  image_type text NOT NULL,
+  storage_path text NULL,
+  provider text NOT NULL,
+  fallback_used boolean NOT NULL DEFAULT false,
+  mime_type text NOT NULL,
+  original_resolution text NULL,
+  final_resolution text NULL,
+  resized_from text NULL,
+  resized_to text NULL,
+  latency_ms integer NULL,
+  status text NOT NULL DEFAULT 'uploaded',
+  user_id uuid NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT story_images_pkey PRIMARY KEY (id),
+  CONSTRAINT story_images_story_id_fkey FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE,
+  CONSTRAINT story_images_chapter_id_fkey FOREIGN KEY (chapter_id) REFERENCES story_chapters(id) ON DELETE SET NULL,
+  CONSTRAINT story_images_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+
+CREATE UNIQUE INDEX uniq_story_images
+ON public.story_images (story_id, COALESCE(chapter_id, '00000000-0000-0000-0000-000000000000'::uuid), image_type);
+
 CREATE TABLE public.audio_files (
   id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
   user_id uuid NOT NULL,

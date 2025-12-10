@@ -65,6 +65,8 @@ export interface StoryOptionsState {
   setDuration: (duration: StoryDuration) => void;
   setMoral: (moral: string) => void;
   setGenre: (genre: string) => void;
+   setCreationMode: (mode: 'standard' | 'image') => void;
+   setImageStyle: (style: string) => void;
   setAdditionalDetails: (details?: string | null) => void;
   
   // Multiple character selection functions

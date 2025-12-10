@@ -1,9 +1,9 @@
 // supabase/edge-functions/story-continuation/index.ts
 // v7.0 (OpenAI Client + JSON Output): Uses OpenAI client for Gemini, expects structured JSON.
-import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
-import { corsHeaders } from '../_shared/cors.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.8';
-import OpenAI from "npm:openai@^4.33.0";
+import { serve } from "std/http/server.ts";
+import { corsHeaders } from "../_shared/cors.ts";
+import { createClient } from "supabase";
+import OpenAI from "openai";
 
 import {
   createContinuationOptionsPrompt,
@@ -161,7 +161,7 @@ async function generateContinuationOptions(
         // Fix unescaped control characters within JSON string values
         cleanedContent = cleanedContent.replace(
           /"(summary|title|content)"\s*:\s*"((?:[^"\\]|\\.)*)"/gs,
-          (_match, key, value) => {
+          (_match: string, key: string, value: string) => {
             // Fix unescaped control characters
             let fixedValue = value
               .replace(/\r\n/g, '\\n')  // Windows line endings
@@ -237,7 +237,7 @@ function cleanExtractedText(text: string | undefined | null, type: 'title' | 'co
 
   if (type === 'content') {
     cleaned = cleaned.replace(/^\s*\d+\.\s+/gm, '');
-    cleaned = cleaned.replace(/^\s*[-\*]\s+/gm, '');
+    cleaned = cleaned.replace(/^\s*[-*]\s+/gm, '');
   }
   if (type === 'title') {
     cleaned = cleaned.replace(/^["'“‘](.*)["'”’]$/s, '$1').trim();
@@ -460,7 +460,7 @@ serve(async (req: Request) => {
           // Fix unescaped control characters within JSON string values
           cleanedContent = cleanedContent.replace(
             /"(title|content)"\s*:\s*"((?:[^"\\]|\\.)*)"/gs,
-            (_match, key, value) => {
+            (_match: string, key: string, value: string) => {
               // Fix unescaped control characters
               let fixedValue = value
                 .replace(/\r\n/g, '\\n')  // Windows line endings

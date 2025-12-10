@@ -29,18 +29,28 @@ const GEMINI_ASPECT_RATIO_PRIORITY: GeminiAspectRatio[] = [
   '16:9',
 ];
 
-export const OPENAI_LEGACY_SIZES: Record<string, string> = {
+export const OPENAI_LEGACY_SIZES = {
   '4:5': '1024x1792',
   '3:4': '1024x1792',
   '1:1': '1024x1024',
   '9:16': '1024x1792',
   '16:9': '1792x1024',
   '4:3': '1792x1024',
-};
+} as const;
+
+export type OpenAiFallbackSize = (typeof OPENAI_LEGACY_SIZES)[keyof typeof OPENAI_LEGACY_SIZES];
 
 export const MIN_VERTICAL_RENDER_SIZE = { width: 896, height: 1120 };
 export const A4_CANVAS_PIXELS = { width: 1654, height: 2339 };
+export const A4_CANVAS_LAYOUT_LABEL = 'A4@200dpi';
 export const DEFAULT_SAFE_MARGIN_PX = 72;
+
+export function formatCanvasLayout(
+  canvas: { width: number; height: number } = A4_CANVAS_PIXELS,
+  layoutLabel: string = A4_CANVAS_LAYOUT_LABEL,
+): string {
+  return `${layoutLabel} (${canvas.width}x${canvas.height})`;
+}
 
 function parseRatio(value: string): number | null {
   if (!value) return null;
@@ -104,10 +114,11 @@ export function mapAspectRatio(
 
 export function getOpenAiFallbackSize(
   desired: string = GEMINI_PREFERRED_ASPECT_RATIO
-): string {
+): OpenAiFallbackSize {
   const cleaned = desired.trim().toLowerCase();
-  if (OPENAI_LEGACY_SIZES[cleaned]) {
-    return OPENAI_LEGACY_SIZES[cleaned];
+  const directSize = OPENAI_LEGACY_SIZES[cleaned as keyof typeof OPENAI_LEGACY_SIZES];
+  if (directSize) {
+    return directSize;
   }
   const mapped = mapAspectRatio(cleaned);
   return OPENAI_LEGACY_SIZES[mapped.resolved] ?? OPENAI_LEGACY_SIZES['3:4'];
@@ -118,9 +129,11 @@ export interface ImageLayoutSpec {
   resolvedAspectRatio: GeminiAspectRatio;
   isFallback: boolean;
   canvas: { width: number; height: number };
+  layoutLabel: string;
+  canvasLabel: string;
   safeMarginPx: { top: number; right: number; bottom: number; left: number };
   minRenderSize: { width: number; height: number };
-  openaiFallbackSize: string;
+  openaiFallbackSize: OpenAiFallbackSize;
 }
 
 export function getImageLayout(options?: {
@@ -136,6 +149,8 @@ export function getImageLayout(options?: {
     resolvedAspectRatio: mapped.resolved,
     isFallback: mapped.requested.trim().toLowerCase() !== mapped.resolved,
     canvas: { ...A4_CANVAS_PIXELS },
+    layoutLabel: A4_CANVAS_LAYOUT_LABEL,
+    canvasLabel: formatCanvasLayout(A4_CANVAS_PIXELS, A4_CANVAS_LAYOUT_LABEL),
     safeMarginPx: {
       top: safeMargin,
       right: safeMargin,

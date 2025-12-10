@@ -159,11 +159,11 @@ export default function StoryContinuation() {
 
       navigate(`/story/${storyId}?chapter=${newChapter.chapterNumber - 1}`);
 
-    } catch (error: any) {
+    } catch (error) {
       console.error("Error al generar continuación:", error);
       toast.dismiss();
       toast.error("Error al generar la continuación", {
-        description: error?.message || "Inténtalo de nuevo.",
+        description: error instanceof Error ? error.message : "Inténtalo de nuevo.",
       });
     } finally {
       setIsLoading(false);

@@ -54,6 +54,8 @@ export type StoryOptions = {
   characters: StoryCharacter[];  // Unified: array de personajes (1-4)
   genre: string;
   duration: StoryDuration;
+  creationMode?: 'standard' | 'image';
+  imageStyle?: string;
   language?: string;
   userProvidedContext?: string;
 }

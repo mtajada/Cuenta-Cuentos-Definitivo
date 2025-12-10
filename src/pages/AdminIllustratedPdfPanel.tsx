@@ -14,7 +14,9 @@ import { Switch } from '../components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { getImageProviderConfig } from '@/services/ai/imageProviderConfig';
 import { getImageLayout, mapAspectRatio } from '@/lib/image-layout';
+import { DEFAULT_IMAGE_STYLE_ID } from '@/lib/image-styles';
 import { IMAGES_TYPE } from '../constants/story-images.constant';
+import { GeneratedImageMetadata, ImageGenerationSummary } from '@/services/ai/imageGenerationService';
 
 const ADMIN_CODE = 'TaleMe2025';
 
@@ -36,6 +38,12 @@ const IMAGE_TYPE_LABELS: Record<string, string> = {
   [IMAGES_TYPE.SCENE_4]: 'Escena 4',
   [IMAGES_TYPE.CLOSING]: 'Cierre',
   [IMAGES_TYPE.CHARACTER]: 'Personaje',
+};
+
+type LiveGenerationInfo = {
+  summary?: ImageGenerationSummary;
+  metadataByType?: Partial<Record<string, GeneratedImageMetadata>>;
+  imageUrls?: Partial<Record<string, string>>;
 };
 
 /**
@@ -69,16 +77,25 @@ export default function AdminIllustratedPdfPanel() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [progress, setProgress] = useState<ImageGenerationProgress | null>(null);
+  const [liveGenerationInfo, setLiveGenerationInfo] = useState<LiveGenerationInfo | null>(null);
   const [imageDetails, setImageDetails] = useState<Record<string, StoryImageValidationDetail> | null>(null);
   const [metadataLoading, setMetadataLoading] = useState(false);
   const [metadataError, setMetadataError] = useState('');
   const [missingImages, setMissingImages] = useState<string[]>([]);
+  const legacyImageTypes = useMemo(() => {
+    if (!imageDetails) return [];
+    return Object.entries(imageDetails)
+      .filter(([, detail]) => detail?.storageBucket && detail.storageBucket !== 'images-stories')
+      .map(([type]) => IMAGE_TYPE_LABELS[type] ?? type);
+  }, [imageDetails]);
+  const hasLegacyImages = legacyImageTypes.length > 0;
 
   const loadMetadata = useCallback(
     async (targetStoryId: string, targetChapterId: string) => {
       if (!targetStoryId || !targetChapterId) {
         setImageDetails(null);
         setMissingImages([]);
+        setLiveGenerationInfo(null);
         return;
       }
 
@@ -106,6 +123,7 @@ export default function AdminIllustratedPdfPanel() {
   );
 
   useEffect(() => {
+    setLiveGenerationInfo(null);
     if (story && selectedChapterId) {
       loadMetadata(story.id, selectedChapterId);
     } else {
@@ -179,12 +197,26 @@ export default function AdminIllustratedPdfPanel() {
         }
       }
 
+      const baseOptions =
+        parsedOptions || { genre: 'Desconocido', language: 'es', characters: [], moral: '', duration: 'short' };
+      const creationMode = storyData.creation_mode || baseOptions.creationMode || 'standard';
+      const imageStyle =
+        baseOptions.imageStyle ||
+        storyData.image_style ||
+        DEFAULT_IMAGE_STYLE_ID;
+
+      const optionsWithStyle = {
+        ...baseOptions,
+        creationMode,
+        imageStyle: creationMode === 'image' ? imageStyle : undefined,
+      };
+
       const storyWithChapters: StoryWithChapters = {
         id: storyData.id,
         title: storyData.title,
         content: storyData.content,
         audioUrl: storyData.audioUrl,
-        options: parsedOptions || { genre: 'Desconocido', language: 'es', characters: [], moral: '', duration: 'short' },
+        options: optionsWithStyle,
         createdAt: storyData.createdAt,
         additional_details: storyData.additional_details,
         chapters: storyData.chapters || [],
@@ -210,20 +242,121 @@ export default function AdminIllustratedPdfPanel() {
     }
 
     const fromLabel = detail.resizedFrom ?? detail.originalResolution ?? null;
-    const toLabel = detail.resizedTo ?? detail.finalResolution ?? null;
+    const toLabel =
+      detail.resizedTo ??
+      detail.finalResolutionPx ??
+      detail.finalResolution?.match(/\d{2,5}x\d{2,5}/)?.[0] ??
+      detail.finalResolution ??
+      null;
 
-    if (!detail.resizedFrom && !detail.resizedTo) {
+    const isCanvas =
+      (toLabel && toLabel === canvasResolution) ||
+      detail.finalLayout === layoutSpec.layoutLabel ||
+      detail.canvasLabel === layoutSpec.canvasLabel;
+
+    if (!fromLabel && !toLabel) {
       return <Badge variant="outline">Sin cambios</Badge>;
     }
 
     return (
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline">
-          {(fromLabel ?? '—') + ' → ' + (toLabel ?? '—')}
-        </Badge>
-        {detail.resizedTo && detail.resizedTo === canvasResolution ? (
-          <Badge variant="secondary">Lienzo A4</Badge>
+        {fromLabel || toLabel ? (
+          <Badge variant="outline">
+            {(fromLabel ?? '—') + ' → ' + (toLabel ?? '—')}
+          </Badge>
         ) : null}
+        {isCanvas ? (
+          <Badge variant="secondary">{detail.canvasLabel ?? layoutSpec.canvasLabel}</Badge>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderAspectRatioInfo = (detail?: StoryImageValidationDetail) => {
+    const requested = detail?.requestedAspectRatio ?? aspectRatioInfo.requested;
+    const effective = detail?.effectiveAspectRatio ?? aspectRatioInfo.resolved;
+    const requestSize = detail?.requestSize ?? layoutSpec.openaiFallbackSize;
+
+    if (!requested && !effective && !requestSize) {
+      return <span className="text-muted-foreground">—</span>;
+    }
+
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {(requested || effective) && (
+          <Badge variant="outline">
+            {(requested ?? '—') + (effective ? ` → ${effective}` : '')}
+          </Badge>
+        )}
+        {requestSize ? (
+          <Badge variant="secondary">{requestSize}</Badge>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderFinalResolution = (detail?: StoryImageValidationDetail) => {
+    if (!detail) {
+      return <span className="text-muted-foreground">—</span>;
+    }
+
+    const layoutTag = detail.finalLayout ?? detail.canvasLabel ?? null;
+    const pxLabel = detail.finalResolutionPx ?? null;
+    const fallbackLabel = detail.finalResolution ?? detail.originalResolution ?? '—';
+
+    return (
+      <div className="flex flex-col gap-1">
+        {layoutTag ? <Badge variant="secondary">{layoutTag}</Badge> : null}
+        <span className="text-xs text-muted-foreground">{pxLabel ?? fallbackLabel}</span>
+      </div>
+    );
+  };
+
+  const renderLiveGenerationTelemetry = () => {
+    if (!liveGenerationInfo) {
+      return null;
+    }
+
+    const { summary, metadataByType } = liveGenerationInfo;
+    const entries = metadataByType ? Object.entries(metadataByType).filter(([, meta]) => Boolean(meta)) : [];
+    const providerStats = entries.reduce<Record<string, number>>((acc, [, meta]) => {
+      const provider = meta?.providerUsed ?? 'desconocido';
+      acc[provider] = (acc[provider] ?? 0) + 1;
+      return acc;
+    }, {});
+    const fallbackCount = entries.filter(([, meta]) => meta?.fallbackUsed).length;
+
+    return (
+      <div className="space-y-2 rounded-lg border border-dashed bg-muted/30 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {summary ? (
+            <>
+              <Badge variant="outline">Default: {summary.defaultProvider.toUpperCase()}</Badge>
+              <Badge variant="outline">Fallback: {summary.fallbackProvider.toUpperCase()}</Badge>
+              <Badge variant={summary.fallbackApplied ? 'destructive' : 'secondary'}>
+                {summary.requestedAspectRatio} → {summary.resolvedAspectRatio}
+                {summary.fallbackApplied ? ' (fallback)' : ''}
+              </Badge>
+            </>
+          ) : (
+            <Badge variant="outline">Sin summary en vivo</Badge>
+          )}
+        </div>
+        {entries.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+            <span>
+              Proveedores:{' '}
+              {Object.entries(providerStats)
+                .map(([provider, count]) => `${provider} (${count})`)
+                .join(' · ')}
+            </span>
+            <span>
+              Fallbacks: {fallbackCount}/{entries.length}
+            </span>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">Aún no hay trazas locales de esta ejecución.</p>
+        )}
       </div>
     );
   };
@@ -247,16 +380,34 @@ export default function AdminIllustratedPdfPanel() {
     setError('');
     setSuccess('');
     setProgress(null);
+    setLiveGenerationInfo(null);
 
     try {
+      const resolvedImageStyle = story.options?.imageStyle || DEFAULT_IMAGE_STYLE_ID;
+
       const pdfBlob = await StoryPdfService.generateCompleteIllustratedPdf({
         title: `${story.title} - ${selectedChapter.title}`,
         content: selectedChapter.content,
         storyId: story.id,
         chapterId: selectedChapterId,
+        imageStyle: resolvedImageStyle,
         onProgress: (progressData) => {
           setProgress(progressData);
-        }
+          if (progressData.metadataByType || progressData.summary) {
+            setLiveGenerationInfo({
+              summary: progressData.summary,
+              metadataByType: progressData.metadataByType,
+              imageUrls: progressData.imageUrls,
+            });
+          }
+        },
+        onGenerationResult: (result) => {
+          setLiveGenerationInfo({
+            summary: result.summary,
+            metadataByType: result.metadataByType,
+            imageUrls: result.imageUrls,
+          });
+        },
       });
 
       // Download PDF
@@ -368,6 +519,11 @@ export default function AdminIllustratedPdfPanel() {
                 </div>
               </div>
             </div>
+            <p className="text-xs text-muted-foreground">
+              El payload envía este orden a la Edge <code>generate-image</code>. La función también puede resolverlo
+              desde <code>IMAGE_PROVIDER_DEFAULT</code>/<code>IMAGE_PROVIDER_FALLBACK</code> y mantiene fallback automático
+              si el proveedor activo falla.
+            </p>
             <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
               <span>
                 Ratio preferido:&nbsp;
@@ -379,6 +535,14 @@ export default function AdminIllustratedPdfPanel() {
                   {aspectRatioInfo.resolved}
                   {aspectRatioInfo.isFallback ? ' (fallback)' : ''}
                 </Badge>
+              </span>
+              <span>
+                Lienzo de normalización:&nbsp;
+                <Badge variant="outline">{layoutSpec.canvasLabel}</Badge>
+              </span>
+              <span>
+                Tamaño de solicitud (OpenAI fallback):&nbsp;
+                <Badge variant="outline">{layoutSpec.openaiFallbackSize}</Badge>
               </span>
             </div>
           </CardContent>
@@ -423,6 +587,15 @@ export default function AdminIllustratedPdfPanel() {
               </div>
             )}
 
+            {liveGenerationInfo ? (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Trazas en vivo (última llamada generate-image)
+                </p>
+                {renderLiveGenerationTelemetry()}
+              </div>
+            ) : null}
+
             {imageDetails && Object.keys(imageDetails).length > 0 ? (
               <div className="overflow-x-auto">
                 <Table>
@@ -431,6 +604,7 @@ export default function AdminIllustratedPdfPanel() {
                       <TableHead>Imagen</TableHead>
                       <TableHead>Proveedor</TableHead>
                       <TableHead>Fallback</TableHead>
+                      <TableHead>Aspecto</TableHead>
                       <TableHead>Resolución final</TableHead>
                       <TableHead>Normalización</TableHead>
                       <TableHead>Resolución original</TableHead>
@@ -464,40 +638,48 @@ export default function AdminIllustratedPdfPanel() {
                                 <Badge variant="outline">Principal</Badge>
                               )
                             ) : isMissing ? (
-                            <Badge variant="outline">Pendiente</Badge>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>{detail?.finalResolution ?? detail?.originalResolution ?? '—'}</TableCell>
-                        <TableCell>{renderNormalizationInfo(detail)}</TableCell>
-                        <TableCell>{detail?.originalResolution ?? '—'}</TableCell>
-                        <TableCell>{detail?.latencyMs ? `${detail.latencyMs} ms` : '—'}</TableCell>
-                        <TableCell>
-                          {detail?.mimeType ? (
-                            <Badge variant="secondary">{detail.mimeType}</Badge>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {detail?.storagePath ? (
-                            <code className="text-xs break-all">{detail.storagePath}</code>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {detail ? (
-                            <Button asChild variant="link" size="sm" className="px-0">
-                              <a href={detail.publicUrl} target="_blank" rel="noopener noreferrer">
-                                Abrir
-                              </a>
-                            </Button>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
+                              <Badge variant="outline">Pendiente</Badge>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>{renderAspectRatioInfo(detail)}</TableCell>
+                          <TableCell>{renderFinalResolution(detail)}</TableCell>
+                          <TableCell>{renderNormalizationInfo(detail)}</TableCell>
+                          <TableCell>{detail?.originalResolution ?? '—'}</TableCell>
+                          <TableCell>{detail?.latencyMs ? `${detail.latencyMs} ms` : '—'}</TableCell>
+                          <TableCell>
+                            {detail?.mimeType ? (
+                              <Badge variant="secondary">{detail.mimeType}</Badge>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {detail?.storagePath ? (
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2">
+                                  <Badge variant={detail.storageBucket === 'images-stories' || !detail.storageBucket ? 'secondary' : 'destructive'}>
+                                    {detail.storageBucket ?? 'images-stories'}
+                                  </Badge>
+                                </div>
+                                <code className="text-xs break-all">{detail.storagePath}</code>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {detail?.publicUrl ? (
+                              <Button asChild variant="link" size="sm" className="px-0">
+                                <a href={detail.publicUrl} target="_blank" rel="noopener noreferrer">
+                                  Abrir
+                                </a>
+                              </Button>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
                         </TableRow>
                       );
                     })}
@@ -519,6 +701,13 @@ export default function AdminIllustratedPdfPanel() {
                   {missingImages.join(', ')}
                 </p>
               </div>
+            )}
+            {hasLegacyImages && (
+              <Alert>
+                <AlertDescription>
+                  Fallback temporal al bucket legacy <code>story-images</code> para: {legacyImageTypes.join(', ')}. Ejecuta el backfill a <code>images-stories</code> y elimina el legado en cuanto termine la migración.
+                </AlertDescription>
+              </Alert>
             )}
           </CardContent>
         </Card>

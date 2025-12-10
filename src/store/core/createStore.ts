@@ -4,7 +4,12 @@ import { persist } from 'zustand/middleware';
 // Almacenamiento global del ID de usuario autenticado
 let currentAuthUserId: string | null = null;
 // Lista de stores que necesitan ser refrescados cuando cambia el usuario
-const storesRegistry: {[key: string]: Function} = {};
+type RefreshFn = () => void;
+type StoreSetter<T> = (partial: Partial<T> | ((state: T) => Partial<T>)) => void;
+type StoreGetter<T> = () => T;
+type StoreLogic<T> = (set: StoreSetter<T>, get: StoreGetter<T>) => Partial<T>;
+
+const storesRegistry: Record<string, RefreshFn> = {};
 
 /**
  * Establece el ID del usuario autenticado actualmente
@@ -85,7 +90,7 @@ export const refreshAllStores = () => {
 /**
  * Registra una función para refrescar un store cuando cambia el usuario
  */
-export const registerStoreRefresh = (storeName: string, refreshFn: Function) => {
+export const registerStoreRefresh = (storeName: string, refreshFn: RefreshFn) => {
   storesRegistry[storeName] = refreshFn;
   console.log(`Store ${storeName} registrado para refresco automático`);
 };
@@ -96,7 +101,7 @@ export const registerStoreRefresh = (storeName: string, refreshFn: Function) => 
  */
 export const createPersistentStore = <T>(
   initialState: Partial<T>,
-  storeLogic: (set: Function, get: Function) => Partial<T>,
+  storeLogic: StoreLogic<T>,
   storeName: string
 ) => {
   const fullStoreName = getStoreNameWithUserId(storeName);

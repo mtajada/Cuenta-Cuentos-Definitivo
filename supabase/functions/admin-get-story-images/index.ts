@@ -57,7 +57,7 @@ serve(async (req) => {
     let query = supabaseAdmin
       .from('story_images')
       .select(
-        'image_type, storage_path, provider, fallback_used, mime_type, original_resolution, final_resolution, resized_from, resized_to, latency_ms, chapter_id'
+        'image_type, storage_path, storage_bucket, provider, fallback_used, mime_type, original_resolution, final_resolution, resized_from, resized_to, latency_ms, chapter_id, status, style_id, openai_style'
       )
       .eq('story_id', storyId);
 

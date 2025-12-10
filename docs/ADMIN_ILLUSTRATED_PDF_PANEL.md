@@ -126,7 +126,7 @@ La Edge Function usa `service_role` key que tiene permisos totales:
    ↓
 6. StoryPdfService consulta `public.story_images` y valida ilustraciones normalizadas (`images-stories/*.jpeg`)
    ↓
-7. Si faltan imágenes → ImageGenerationService genera con IA
+7. Si faltan imágenes → ImageGenerationService ejecuta el pipeline `Gemini → normalización A4 (ImageScript) → fallback OpenAI sólo ante fallo técnico`, sube a `images-stories` y registra metadatos en `public.story_images`
    ↓
 8. PdfService crea PDF ilustrado
    ↓
@@ -180,7 +180,7 @@ Si necesitas más datos de la historia:
 
 ### Backfill de ilustraciones legacy
 
-Cuando existan recursos antiguos en `story-images`, utiliza el script Deno `supabase/scripts/backfill-images-stories.ts`:
+Si detectas ilustraciones previas al pipeline Nano Banana, ejecuta el script Deno `supabase/scripts/backfill-images-stories.ts` para moverlas a `images-stories` y registrar su metadata en `public.story_images`:
 
 1. Exporta credenciales: `export SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=...`
 2. Ejecuta un dry-run para validar el alcance:
@@ -197,7 +197,7 @@ Cuando existan recursos antiguos en `story-images`, utiliza el script Deno `supa
 
 4. Para eliminar los assets legacy una vez migrados agrega `BACKFILL_DELETE_SOURCE=true`.
 
-El script reconvierte las imágenes con la rutina oficial de normalización, las sube como `.jpeg` al bucket `images-stories` y registra metadatos en `public.story_images`.
+El script reconvierte las imágenes con la rutina oficial de normalización, las sube como `.jpeg` al bucket `images-stories` y registra metadatos en `public.story_images`. No existe fallback a buckets antiguos: si faltan `.jpeg` normalizados en `images-stories`, ejecuta el backfill o regenera las imágenes desde el panel antes de crear el PDF.
 
 ## 🐛 Troubleshooting
 

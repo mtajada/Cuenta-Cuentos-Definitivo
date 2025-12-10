@@ -1,6 +1,6 @@
-import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
-import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { corsHeaders } from '../_shared/cors.ts'; // Asegúrate que la ruta sea correcta
+import { serve } from 'std/http/server.ts';
+import { createClient, type SupabaseClient } from 'supabase';
+import { corsHeaders } from '../_shared/cors.ts';
 
 // Tipado para los datos de la base de datos (opcional pero recomendado)
 interface ChapterAudioFile {
@@ -11,7 +11,7 @@ interface ChapterAudioFile {
   voice_id: string;
   storage_path: string;
   public_url: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   created_at?: string;
 }
 
@@ -36,14 +36,20 @@ serve(async (req: Request) => {
     const supabaseClient: SupabaseClient = createClient(supabaseUrl, supabaseServiceKey);
     const formData = await req.formData();
 
-    const chapterId = formData.get('chapterId') as string;
-    const voiceId = formData.get('voiceId') as string;
-    const audioFile = formData.get('audioFile') as File;
-    const userId = formData.get('userId') as string;
-    const storyId = formData.get('storyId') as string; // Añadido para la ruta de almacenamiento
+    const chapterId = formData.get('chapterId');
+    const voiceId = formData.get('voiceId');
+    const audioFile = formData.get('audioFile');
+    const userId = formData.get('userId');
+    const storyId = formData.get('storyId');
 
-    if (!chapterId || !voiceId || !audioFile || !storyId) {
-      return new Response(JSON.stringify({ error: 'Faltan parámetros: storyId, chapterId, voiceId o audioFile' }), {
+    if (
+      typeof chapterId !== 'string' ||
+      typeof voiceId !== 'string' ||
+      !(audioFile instanceof File) ||
+      typeof storyId !== 'string' ||
+      typeof userId !== 'string'
+    ) {
+      return new Response(JSON.stringify({ error: 'Faltan parámetros: storyId, chapterId, voiceId, userId o audioFile' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 400,
       });
@@ -55,7 +61,7 @@ serve(async (req: Request) => {
 
     console.log(`Subiendo archivo a: ${bucketName}/${filePath}`);
 
-    const { data: uploadData, error: uploadError } = await supabaseClient.storage
+    const { error: uploadError } = await supabaseClient.storage
       .from(bucketName)
       .upload(filePath, audioFile, {
         cacheControl: '3600',
@@ -117,8 +123,9 @@ serve(async (req: Request) => {
     });
 
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Error interno del servidor';
     console.error('Error en Edge Function (upload-chapter-audio):', error);
-    return new Response(JSON.stringify({ error: error.message || 'Error interno del servidor' }), {
+    return new Response(JSON.stringify({ error: message || 'Error interno del servidor' }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
     });

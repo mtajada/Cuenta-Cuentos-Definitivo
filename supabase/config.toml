@@ -68,12 +68,16 @@ minimum_password_length = 6
 password_requirements = ""
 
 [auth.rate_limit]
-email_sent = 2
-sms_sent = 30
-anonymous_users = 30
-token_refresh = 150
-sign_in_sign_ups = 30
-token_verifications = 30
+### Development override: we don’t want auth throttling locally
+# These limits only apply when running `supabase start` with this config.
+# Production (Supabase Cloud) rate limits are managed in the project settings,
+# so feel free to keep these generous for local QA.
+email_sent = 500
+sms_sent = 500
+anonymous_users = 500
+token_refresh = 1000
+sign_in_sign_ups = 500
+token_verifications = 1000
 
 [auth.email]
 enable_signup = true

@@ -1,11 +1,13 @@
 import { supabase } from '../../supabaseClient';
 import { StoryScenes } from '../../types';
+import { DEFAULT_IMAGE_STYLE_ID, getImageStyleById } from '@/lib/image-styles';
 
 interface GenerateScenesParams {
   storyId: string;
   content: string;
   title: string;
   language?: string;
+  imageStyle?: string;
 }
 
 interface GenerateScenesResponse {
@@ -36,6 +38,7 @@ export class ScenesGenerationService {
 
       const token = session.access_token;
       const edgeFunctionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-scenes-from-content`;
+      const imageStyle = getImageStyleById(params.imageStyle)?.id ?? DEFAULT_IMAGE_STYLE_ID;
 
       console.log(`[ScenesGenerationService] Calling edge function: ${edgeFunctionUrl}`);
 
@@ -50,6 +53,7 @@ export class ScenesGenerationService {
           content: params.content,
           title: params.title,
           language: params.language || 'Español',
+          imageStyle,
         }),
       });
 
@@ -97,4 +101,3 @@ export class ScenesGenerationService {
     }
   }
 }
-

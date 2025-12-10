@@ -52,7 +52,7 @@ export default function ManageSubscriptionButton({ className = '' }: ManageSubsc
     } catch (err) { // err es 'unknown'
       // Manejo de errores inesperados (ej. red, error no capturado antes)
       console.error("Unexpected error in handleManageSubscription:", err);
-      let errorMessage = "Ocurrió un error inesperado al procesar la solicitud.";
+      const errorMessage = "Ocurrió un error inesperado al procesar la solicitud.";
       // Opcional: intentar obtener un mensaje más específico
       // if (err instanceof Error) { errorMessage = err.message; }
       // else if (typeof err === 'string') { errorMessage = err; }

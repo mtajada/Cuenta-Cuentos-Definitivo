@@ -1,5 +1,5 @@
 import { mapAspectRatio, getOpenAiFallbackSize, GEMINI_PREFERRED_ASPECT_RATIO } from '../_shared/image-layout.ts';
-import { OpenAI } from "https://esm.sh/openai@4.40.0";
+import { OpenAI } from "openai";
 
 interface BaseProviderConfig {
   prompt: string;
@@ -14,11 +14,11 @@ export interface GeminiProviderConfig extends BaseProviderConfig {
 
 export interface OpenAiProviderConfig extends BaseProviderConfig {
   client: OpenAI;
-  model?: string;
-  quality?: 'standard' | 'hd';
-  style?: 'vivid' | 'natural';
-  sizeOverride?: string;
-  background?: 'opaque';
+  model?: OpenAI.Images.ImageGenerateParams['model'];
+  quality?: OpenAI.Images.ImageGenerateParams['quality'];
+  style?: OpenAI.Images.ImageGenerateParams['style'];
+  sizeOverride?: OpenAI.Images.ImageGenerateParams['size'];
+  background?: OpenAI.Images.ImageGenerateParams['background'];
 }
 
 export interface ProviderResult {
@@ -56,6 +56,51 @@ function decodeBase64ToUint8Array(base64: string): Uint8Array {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes;
+}
+
+function parseSizeToDimensions(size?: string): { width: number; height: number } | null {
+  if (!size) return null;
+  const [widthStr, heightStr] = size.toLowerCase().split('x');
+  const width = Number.parseInt(widthStr, 10);
+  const height = Number.parseInt(heightStr, 10);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  return { width, height };
+}
+
+function formatAspectRatio(width: number, height: number): string | null {
+  const gcd = (a: number, b: number): number => {
+    let x = Math.abs(a);
+    let y = Math.abs(b);
+    while (y !== 0) {
+      const temp = y;
+      y = x % y;
+      x = temp;
+    }
+    return x || 1;
+  };
+
+  const divisor = gcd(width, height);
+  if (!Number.isFinite(divisor) || divisor === 0) {
+    return null;
+  }
+
+  const normalizedWidth = Math.round(width / divisor);
+  const normalizedHeight = Math.round(height / divisor);
+  if (!normalizedWidth || !normalizedHeight) {
+    return null;
+  }
+
+  return `${normalizedWidth}:${normalizedHeight}`;
+}
+
+function getEffectiveAspectRatioFromSize(size?: string): string | undefined {
+  const dimensions = parseSizeToDimensions(size);
+  if (!dimensions) {
+    return undefined;
+  }
+  return formatAspectRatio(dimensions.width, dimensions.height) ?? undefined;
 }
 
 export async function generateWithGemini(config: GeminiProviderConfig): Promise<ProviderResult> {
@@ -179,10 +224,11 @@ export async function generateWithOpenAI(config: OpenAiProviderConfig): Promise<
 
   const size = sizeOverride ?? getOpenAiFallbackSize(desiredAspectRatio);
   const startedAt = performance.now();
+  const effectiveAspectRatio = getEffectiveAspectRatioFromSize(size);
 
-  console.log(`${logPrefix} Using size ${size} for desired aspect ratio ${desiredAspectRatio}`);
+  console.log(`${logPrefix} Using size ${size} for desired aspect ratio ${desiredAspectRatio} (effective ${effectiveAspectRatio ?? 'unknown'})`);
 
-  const requestPayload: Record<string, unknown> = {
+  const requestPayload: OpenAI.Images.ImageGenerateParams = {
     model,
     prompt: prompt.trim(),
     size,
@@ -192,20 +238,35 @@ export async function generateWithOpenAI(config: OpenAiProviderConfig): Promise<
     n: 1,
   };
 
-  if (background) {
+  if (background !== undefined) {
     requestPayload.background = background;
   }
 
-  const response = await client.images.generate(requestPayload as any);
+  let response: OpenAI.Images.ImagesResponse;
+  try {
+    response = await client.images.generate(requestPayload);
+  } catch (error) {
+    const status = typeof (error as { status?: number }).status === 'number'
+      ? (error as { status?: number }).status
+      : undefined;
+    const message = error instanceof Error ? error.message : 'OpenAI request failed';
+    const shouldFallback = status === undefined || status >= 500 || status === 429;
+    throw new ProviderError(
+      `OpenAI request failed${status ? ` with status ${status}` : ''}: ${message}`,
+      'openai',
+      status,
+      shouldFallback,
+    );
+  }
 
   if (!response.data?.length) {
-    throw new ProviderError('OpenAI returned no image data', 'openai');
+    throw new ProviderError('OpenAI returned no image data', 'openai', undefined, true);
   }
 
   const imageData = response.data[0];
   const base64 = imageData.b64_json as string | undefined;
   if (!base64) {
-    throw new ProviderError('OpenAI response missing b64_json field', 'openai');
+    throw new ProviderError('OpenAI response missing b64_json field', 'openai', undefined, true);
   }
 
   const buffer = decodeBase64ToUint8Array(base64);
@@ -221,7 +282,7 @@ export async function generateWithOpenAI(config: OpenAiProviderConfig): Promise<
     provider: 'openai',
     finishReason,
     latencyMs,
-    effectiveAspectRatio: desiredAspectRatio,
+    effectiveAspectRatio: effectiveAspectRatio ?? desiredAspectRatio,
     requestedAspectRatio: desiredAspectRatio,
     requestSize: size,
   };

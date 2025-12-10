@@ -2,6 +2,8 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, BookOpen, Sparkles, Plus, Library, Download, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useStoryOptionsStore } from '../store/storyOptions/storyOptionsStore';
+import { DEFAULT_IMAGE_STYLE_ID } from '@/lib/image-styles';
 
 interface IllustratedBooksModalProps {
   isOpen: boolean;
@@ -10,10 +12,13 @@ interface IllustratedBooksModalProps {
 
 export default function IllustratedBooksModal({ isOpen, onClose }: IllustratedBooksModalProps) {
   const navigate = useNavigate();
+  const { setCreationMode, setImageStyle } = useStoryOptionsStore();
 
   const handleCreateStory = () => {
+    setCreationMode("image");
+    setImageStyle(DEFAULT_IMAGE_STYLE_ID);
     onClose();
-    navigate('/duration');
+    navigate('/creation-mode');
   };
 
   const handleGoToStories = () => {
